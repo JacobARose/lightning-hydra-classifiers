@@ -9,8 +9,8 @@ dependencies:
   - pip
   - notebook
   - ipython
-  - cudatoolkit
-  - pytorch=1.8.1
-  - torchvision=0.9.1
+  - cudatoolkit=10.1
+  - pytorch=1.7.1
+  - torchvision=0.8.2
   - pip:
       - -r requirements.txt
