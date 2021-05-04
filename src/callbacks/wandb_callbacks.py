@@ -3,9 +3,11 @@ import os
 from typing import List
 
 import matplotlib.pyplot as plt
-import seaborn as sn
+import seaborn as sns
+import numpy as np
 import torch
 import wandb
+# from torchmetrics import metrics
 from pytorch_lightning import Callback, Trainer
 from pytorch_lightning.loggers import LoggerCollection, WandbLogger
 from sklearn import metrics
@@ -79,7 +81,7 @@ class UploadCheckpointsToWandbAsArtifact(Callback):
 
 class LogConfusionMatrixToWandb(Callback):
     """Generate confusion matrix every epoch and send it to wandb.
-    Expects validation step to return predictions and targets.
+    Expects validation step to return predictions and targets in a dict.
     """
 
     def __init__(self):
@@ -98,9 +100,10 @@ class LogConfusionMatrixToWandb(Callback):
         self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx
     ):
         """Gather data from single batch."""
-        if self.ready:
-            self.preds.append(outputs["preds"])
-            self.targets.append(outputs["targets"])
+#         import pdb; pdb.set_trace()
+#         if self.ready:
+#             self.preds.append(outputs["y_pred"])
+#             self.targets.append(outputs["y_true"])
 
     def on_validation_epoch_end(self, trainer, pl_module):
         """Generate confusion matrix."""
@@ -117,10 +120,10 @@ class LogConfusionMatrixToWandb(Callback):
             plt.figure(figsize=(14, 8))
 
             # set labels size
-            sn.set(font_scale=1.4)
+            sns.set(font_scale=1.4)
 
             # set font size
-            sn.heatmap(confusion_matrix, annot=True, annot_kws={"size": 8}, fmt="g")
+            sns.heatmap(confusion_matrix, annot=True, annot_kws={"size": 8}, fmt="g")
 
             # names should be uniqe or else charts from different experiments in wandb will overlap
             experiment.log({f"confusion_matrix/{experiment.name}": wandb.Image(plt)}, commit=False)
@@ -157,8 +160,8 @@ class LogF1PrecRecHeatmapToWandb(Callback):
     ):
         """Gather data from single batch."""
         if self.ready:
-            self.preds.append(outputs["preds"])
-            self.targets.append(outputs["targets"])
+            self.preds.append(outputs["y_pred"])
+            self.targets.append(outputs["y_true"])
 
     def on_validation_epoch_end(self, trainer, pl_module):
         """Generate f1, precision and recall heatmap."""
@@ -171,21 +174,22 @@ class LogF1PrecRecHeatmapToWandb(Callback):
             f1 = f1_score(preds, targets, average=None)
             r = recall_score(preds, targets, average=None)
             p = precision_score(preds, targets, average=None)
-            data = [f1, p, r]
+            s = np.unique(targets)
+            data = [f1, p, r, s]
 
             # set figure size
-            plt.figure(figsize=(14, 3))
+            plt.figure(figsize=(14, 4))
 
             # set labels size
-            sn.set(font_scale=1.2)
+            sns.set(font_scale=1.2)
 
             # set font size
-            sn.heatmap(
+            sns.heatmap(
                 data,
                 annot=True,
                 annot_kws={"size": 10},
                 fmt=".3f",
-                yticklabels=["F1", "Precision", "Recall"],
+                yticklabels=["F1", "Precision", "Recall", "Support"],
             )
 
             # names should be uniqe or else charts from different experiments in wandb will overlap

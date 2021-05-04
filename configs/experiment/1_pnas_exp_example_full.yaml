@@ -1,0 +1,56 @@
+# @package _global_
+
+# Created Tuesday, April 20th, 2021
+# Author: Jacob A Rose
+# 
+
+# to execute this experiment run:
+# python run.py +experiment=1_pnas_exp_example_full
+
+defaults:
+    - override /trainer: null  # override trainer to null so it's not loaded from main config defaults...
+    - override /model: pnas_resnet_model.yaml
+    - override /datamodule: pnas_datamodule.yaml
+    - override /callbacks: wandb_callbacks.yaml # default_callbacks.yaml  # set this to null if you don't want to use callbacks
+    - override /logger: many_loggers.yaml
+
+# we override default configurations with nulls to prevent them from loading at all
+# instead we define all modules and their paths directly in this config,
+# so everything is stored in one place for more readibility
+
+seed: 12345
+
+trainer:
+    _target_: pytorch_lightning.Trainer
+    gpus: 1
+    min_epochs: 1
+    max_epochs: 25
+    gradient_clip_val: 0.5
+    accumulate_grad_batches: 2
+    weights_summary: null
+    # resume_from_checkpoint: ${work_dir}/last.ckpt
+
+model:
+    _target_: src.models.mnist_model.MNISTLitModel
+    lr: 0.001
+    weight_decay: 0.00005
+    architecture: SimpleDenseNet
+    input_size: 784
+    lin1_size: 256
+    lin2_size: 256
+    lin3_size: 128
+    output_size: 10
+
+datamodule:
+    _target_: contrastive_learning.data.pytorch.pnas.PNASLightningDataModule
+    name: "PNAS_family_100_512"
+    batch_size: 32
+    val_split: 0.2
+    num_workers: 4
+    seed: 98568764
+
+
+# logger:
+#     wandb:
+#         tags: ["best_model", "uwu"]
+#         notes: "Description of this model."

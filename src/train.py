@@ -68,6 +68,9 @@ def train(config: DictConfig) -> Optional[float]:
         logger=logger,
     )
 
+    import pdb; pdb.set_trace()
+    
+    
     # Train the model
     log.info("Starting training!")
     trainer.fit(model=model, datamodule=datamodule)
