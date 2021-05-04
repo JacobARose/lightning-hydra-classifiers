@@ -7,7 +7,7 @@ from pytorch_lightning import seed_everything
 import hydra
 from omegaconf import DictConfig
 
-from src.utils import template_utils
+from lightning_hydra_classifiers.utils import template_utils
 
 log = template_utils.get_logger(__name__)
 

@@ -9,7 +9,7 @@ import torchmetrics as metrics
 # from pytorch_lightning import metrics
 #.classification import Accuracy
 import timm
-# from src.models.modules.simple_dense_net import SimpleDenseNet
+# from lightning_hydra_classifiers.models.modules.simple_dense_net import SimpleDenseNet
 import pandas as pd
 from stuf import stuf
 import wandb

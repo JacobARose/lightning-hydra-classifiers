@@ -5,11 +5,11 @@ setup(name='lightning-hydra-classifiers',
       description='Skeleton code for SimCLR',
       url='https://github.com/jacobarose/lightning-hydra-classifiers',
       license='MIT',
-      package_dir={"": "src"},
-#       packages=['src'],
+      package_dir={"": "lightning_hydra_classifiers"},
+#       packages=['lightning_hydra_classifiers'],
       zip_safe=False)
 
 
 
 # To install:
-# pip install -e contrastive_learning
+# pip install -e lightning_hydra_classifiers

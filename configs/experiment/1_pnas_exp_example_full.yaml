@@ -31,7 +31,7 @@ trainer:
     # resume_from_checkpoint: ${work_dir}/last.ckpt
 
 model:
-    _target_: src.models.mnist_model.MNISTLitModel
+    _target_: lightning_hydra_classifiers.models.mnist_model.MNISTLitModel
     lr: 0.001
     weight_decay: 0.00005
     architecture: SimpleDenseNet

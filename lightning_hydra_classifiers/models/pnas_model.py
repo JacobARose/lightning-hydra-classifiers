@@ -5,7 +5,7 @@ from torch import nn
 from pytorch_lightning import LightningModule
 from pytorch_lightning.metrics.classification import Accuracy
 import timm
-# from src.models.modules.simple_dense_net import SimpleDenseNet
+# from lightning_hydra_classifiers.models.modules.simple_dense_net import SimpleDenseNet
 
 
 class Classifier(nn.Module):
