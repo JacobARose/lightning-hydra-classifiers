@@ -2,9 +2,9 @@
 
 wandb:
     _target_: pytorch_lightning.loggers.wandb.WandbLogger
-    project: "template-tests"
-    entity: '${env:WANDB_ENTITY}'  # set to name of your wandb team or just remove it
-    # offline: False  # set True to store all logs only locally
+    entity: '${oc.env:WANDB_ENTITY}' # "jrose"
+    project: "image_classification"
     job_type: "train"
-    group: ""
-    save_dir: "."
+    group: "stage_0"
+    
+#     save_dir: "."

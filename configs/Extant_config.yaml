@@ -3,8 +3,8 @@
 # specify here default training configuration
 defaults:
     - trainer: default_trainer.yaml
-    - model: mnist_model.yaml
-    - datamodule: mnist_datamodule.yaml
+    - model: pnas_resnet_model.yaml
+    - datamodule: extant_datamodule.yaml
     - callbacks: wandb_callbacks.yaml # default_callbacks.yaml  # set this to null if you don't want to use callbacks
     - logger: many_loggers.yaml # null  # set logger here or use command line (e.g. `python run.py logger=wandb`)
 
@@ -20,12 +20,13 @@ defaults:
 # hydra hijacks working directory by changing it to the current log directory,
 # so it's useful to have this path as a special variable
 # learn more here: https://hydra.cc/docs/next/tutorials/basic/running_your_app/working_directory
-work_dir: ${hydra:runtime.cwd}
+# work_dir: ${hydra:runtime.cwd}
 
 
 # path to folder with data
-data_dir: ${work_dir}/data/
-# root_dir: ${oc.env:WANDB_CACHE_DIR}
+# data_dir: ${work_dir}/data/
+root_dir: ${oc.env:WANDB_CACHE_DIR}
+
 
 # use `python run.py debug=true` for easy debugging!
 # this will run 1 train, val and test loop with only 1 batch
@@ -58,3 +59,7 @@ hydra:
             # https://github.com/wandb/client/issues/1314
             # this env var fixes that
             WANDB_START_METHOD: thread
+
+
+
+# work_dir: ${hydra:runtime.cwd}

@@ -1,0 +1,16 @@
+_target_: contrastive_learning.data.pytorch.extant.ExtantLightningDataModule
+
+
+name: "Extant_family_10_512"
+batch_size: 64
+val_split: 0.0
+image_size: 512
+channels: 3
+class_type: "family"
+normalize: true
+seed: 98568764
+predict_on_split: "val"
+debug: false
+num_workers: 4
+root_dir: ${root_dir}
+dataset_dir: ${.root_dir}/datasets/${.name}
