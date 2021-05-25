@@ -1,6 +1,6 @@
 import glob
 import os
-from typing import List
+from typing import List, Dict
 
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -8,10 +8,150 @@ import numpy as np
 import torch
 import wandb
 # from torchmetrics import metrics
-from pytorch_lightning import Callback, Trainer
+from torch.utils.data import DataLoader #,Dataset, Subset, random_split
+from pytorch_lightning import Callback, Trainer, LightningDataModule
 from pytorch_lightning.loggers import LoggerCollection, WandbLogger
 from sklearn import metrics
 from sklearn.metrics import f1_score, precision_score, recall_score
+
+
+from pathlib import Path
+
+
+
+
+
+
+
+
+def get_labels_from_filepath(path: str, fix_catalog_number: bool = False) -> Dict[str,str]:
+    """
+    Splits a precisely-formatted filename with the expectation that it is constructed with the following fields separated by '_':
+    1. family
+    2. genus
+    3. species
+    4. collection
+    5. catalog_number
+    
+    If fix_catalog_number is True, assume that the collection is not included and must separately be extracted from the first part of the catalog number.
+    
+    """
+    family, genus, species, collection, catalog_number = Path(path).stem.split("_", maxsplit=4)
+    if fix_catalog_number:
+        catalog_number = '_'.join([collection, catalog_number])
+    return {"family":family,
+            "genus":genus,
+            "species":species,
+            "collection":collection,
+            "catalog_number":catalog_number}
+
+
+
+
+
+class ImagePredictionLogger(Callback):
+    def __init__(self, 
+                 datamodule: LightningDataModule,
+                 log_every_n_epochs: int=1,
+                 subset: str='val',
+                 max_samples_per_epoch: int=64,
+                 fix_catalog_number: bool=False):
+        super().__init__()
+        self.max_samples_per_epoch = max_samples_per_epoch
+        self.log_every = log_every_n_epochs
+        self.subset = subset
+        self.datamodule = datamodule
+        self.classes = self.datamodule.classes
+        self.fix_catalog_number = fix_catalog_number
+        self.reset_iterator()
+        
+#     def on_validation_epoch_end(self, trainer, model):
+#         print('Inside hook: on_validation_epoch_end(self, trainer, model)')
+        
+    def reset_iterator(self):
+        self.datamodule.return_paths = True
+        stage = 'test' if self.subset=='test' else 'fit'
+        self.datamodule.setup(stage=stage)
+        self.data_iterator = iter(self.datamodule.get_dataloader(self.subset))
+        
+    def on_validation_epoch_end(self, trainer, model):
+#         self.datamodule.batch_size = self.max_samples_per_epoch
+#         self.datamodule.return_paths = True
+#         stage = 'test' if self.subset=='test' else 'fit'
+#         self.datamodule.setup(stage=stage)
+#         x, y, paths = next(iter(self.datamodule.get_dataloader(self.subset)))
+        x, y, paths = [], [], []
+        for idx, (x_batch, y_batch, paths_batch) in enumerate(self.data_iterator):
+            x.append(x_batch)
+            y.append(y_batch)
+            paths.extend(paths_batch)
+            if idx*x_batch.shape[0] >= self.max_samples_per_epoch:
+                break
+        if len(x)==0:
+            self.reset_iterator()
+            return
+        x = torch.cat(x, 0)
+        y = torch.cat(y, 0)
+#         paths = torch.stack(paths)
+
+        self.current_epoch = trainer.current_epoch
+        skip_epoch = self.current_epoch % self.log_every > 0
+        if skip_epoch:
+            print(f'Current epoch: {self.current_epoch}. Skipping Image Prediction logging.')
+            return
+        print(f'Current epoch: {self.current_epoch}.\nInitiating Image Prediction Artifact creation.')
+        # Get model prediction
+        if model.training:
+            training = True
+            subset='train'
+        else:
+            training = False
+            subset='val'
+        
+        model.eval()
+        logits = model.cpu()(x)
+        preds = torch.argmax(logits, -1)
+        scores = logits.softmax(1)
+        
+        columns = ['catalog_number',
+                   'image',
+                   'guess',
+                   'truth']
+        for j, class_name in enumerate(self.classes):
+            columns.append(f'score_{class_name}')
+
+        x = x.permute(0,2,3,1)
+        prediction_rows = []
+        x = (255 * (x - x.min()) / (x.max() - x.min())).numpy().astype(np.uint8)
+        for i in range(len(preds)):
+            labels = get_labels_from_filepath(path=paths[i],
+                                        fix_catalog_number=self.fix_catalog_number)        
+            row = [
+                    labels['catalog_number'],
+                    wandb.Image(x[i,...]),
+                    self.classes[preds[i]],
+                    self.classes[y[i]]
+            ]
+            
+            for j, score_j in enumerate(scores[i,:].tolist()):
+                row.append(np.round(score_j, 4))
+            prediction_rows.append(row)
+            
+        prediction_table = wandb.Table(data=prediction_rows, columns=columns)
+        prediction_artifact = wandb.Artifact(f"{self.subset}_predictions" + wandb.run.id, 
+                                             type="predictions")
+        prediction_artifact.add(prediction_table, f"{self.subset}_predictions")
+        wandb.run.log_artifact(prediction_artifact)
+        
+        if training:
+            model.train()
+        model.cuda()
+
+        
+###################################
+###################################
+
+
 
 
 def get_wandb_logger(trainer: Trainer) -> WandbLogger:
@@ -79,71 +219,72 @@ class UploadCheckpointsToWandbAsArtifact(Callback):
         experiment.use_artifact(ckpts)
 
 
-class LogConfusionMatrixToWandb(Callback):
-    """Generate confusion matrix every epoch and send it to wandb.
-    Expects validation step to return predictions and targets in a dict.
-    """
+# class LogConfusionMatrixToWandb(Callback):
+#     """Generate confusion matrix every epoch and send it to wandb.
+#     Expects validation step to return predictions and targets in a dict.
+#     """
 
-    def __init__(self):
-        self.preds = []
-        self.targets = []
-        self.ready = True
+#     def __init__(self):
+#         self.preds = []
+#         self.targets = []
+#         self.ready = True
 
-    def on_sanity_check_start(self, trainer, pl_module) -> None:
-        self.ready = False
+#     def on_sanity_check_start(self, trainer, pl_module) -> None:
+#         self.ready = False
 
-    def on_sanity_check_end(self, trainer, pl_module):
-        """Start executing this callback only after all validation sanity checks end."""
-        self.ready = True
+#     def on_sanity_check_end(self, trainer, pl_module):
+#         """Start executing this callback only after all validation sanity checks end."""
+#         self.ready = True
 
-    def on_validation_batch_end(
-        self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx
-    ):
-        """Gather data from single batch."""
-#         import pdb; pdb.set_trace()
+#     def on_validation_batch_end(
+#         self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx
+#     ):
+#         """Gather data from single batch."""
+# #         import pdb; pdb.set_trace()
+# #         if self.ready:
+# #             self.preds.append(outputs["y_pred"])
+# #             self.targets.append(outputs["y_true"])
+
+#     def on_validation_epoch_end(self, trainer, pl_module):
+#         """Generate confusion matrix."""
 #         if self.ready:
-#             self.preds.append(outputs["y_pred"])
-#             self.targets.append(outputs["y_true"])
+#             logger = get_wandb_logger(trainer)
+#             experiment = logger.experiment
 
-    def on_validation_epoch_end(self, trainer, pl_module):
-        """Generate confusion matrix."""
-        if self.ready:
-            logger = get_wandb_logger(trainer)
-            experiment = logger.experiment
+#             preds = torch.cat(self.preds).cpu().numpy()
+#             targets = torch.cat(self.targets).cpu().numpy()
 
-            preds = torch.cat(self.preds).cpu().numpy()
-            targets = torch.cat(self.targets).cpu().numpy()
+#             confusion_matrix = metrics.confusion_matrix(y_true=targets, y_pred=preds)
 
-            confusion_matrix = metrics.confusion_matrix(y_true=targets, y_pred=preds)
+#             # set figure size
+#             plt.figure(figsize=(14, 8))
 
-            # set figure size
-            plt.figure(figsize=(14, 8))
+#             # set labels size
+#             sns.set(font_scale=1.4)
 
-            # set labels size
-            sns.set(font_scale=1.4)
+#             # set font size
+#             sns.heatmap(confusion_matrix, annot=True, annot_kws={"size": 8}, fmt="g")
 
-            # set font size
-            sns.heatmap(confusion_matrix, annot=True, annot_kws={"size": 8}, fmt="g")
+#             # names should be uniqe or else charts from different experiments in wandb will overlap
+#             experiment.log({f"confusion_matrix/{experiment.name}": wandb.Image(plt)}, commit=False)
 
-            # names should be uniqe or else charts from different experiments in wandb will overlap
-            experiment.log({f"confusion_matrix/{experiment.name}": wandb.Image(plt)}, commit=False)
+#             # according to wandb docs this should also work but it crashes
+#             # experiment.log(f{"confusion_matrix/{experiment.name}": plt})
 
-            # according to wandb docs this should also work but it crashes
-            # experiment.log(f{"confusion_matrix/{experiment.name}": plt})
+#             # reset plot
+#             plt.clf()
 
-            # reset plot
-            plt.clf()
-
-            self.preds.clear()
-            self.targets.clear()
+#             self.preds.clear()
+#             self.targets.clear()
 
 
-class LogF1PrecRecHeatmapToWandb(Callback):
+class LogPerClassMetricsToWandb(Callback):
     """Generate f1, precision, recall heatmap every epoch and send it to wandb.
     Expects validation step to return predictions and targets.
     """
 
     def __init__(self, class_names: List[str] = None):
+        self.class_names = class_names
         self.preds = []
         self.targets = []
         self.ready = True
@@ -159,44 +300,287 @@ class LogF1PrecRecHeatmapToWandb(Callback):
         self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx
     ):
         """Gather data from single batch."""
+        if not isinstance(outputs, dict):
+            return
+        if 'log' in outputs.keys():
+            outputs = outputs['log']
+        elif 'hidden' in outputs.keys():
+            outputs = outputs['hidden']
         if self.ready:
-            self.preds.append(outputs["y_pred"])
-            self.targets.append(outputs["y_true"])
+            self.preds.append(outputs["y_pred"].cpu())
+            self.targets.append(outputs["y_true"].cpu())
 
     def on_validation_epoch_end(self, trainer, pl_module):
-        """Generate f1, precision and recall heatmap."""
-        if self.ready:
-            logger = get_wandb_logger(trainer=trainer)
-            experiment = logger.experiment
+        """Generate f1, precision and recall heatmap,
+        then generate confusion matrix."""
+        if self.ready and len(self.preds) and len(self.targets):
+            wandb_logger = get_wandb_logger(trainer=trainer)
 
-            preds = torch.cat(self.preds).cpu().numpy()
-            targets = torch.cat(self.targets).cpu().numpy()
-            f1 = f1_score(preds, targets, average=None)
-            r = recall_score(preds, targets, average=None)
-            p = precision_score(preds, targets, average=None)
-            s = np.unique(targets)
-            data = [f1, p, r, s]
-
-            # set figure size
-            plt.figure(figsize=(14, 4))
-
-            # set labels size
-            sns.set(font_scale=1.2)
-
-            # set font size
-            sns.heatmap(
-                data,
-                annot=True,
-                annot_kws={"size": 10},
-                fmt=".3f",
-                yticklabels=["F1", "Precision", "Recall", "Support"],
-            )
-
-            # names should be uniqe or else charts from different experiments in wandb will overlap
-            experiment.log({f"f1_p_r_heatmap/{experiment.name}": wandb.Image(plt)}, commit=False)
-
-            # reset plot
-            plt.clf()
-
+            preds = torch.cat(self.preds).numpy() #.cpu().numpy()
+            targets = torch.cat(self.targets).numpy() #.cpu().numpy()
+            
+            self._log_per_class_scores(preds, targets, logger=wandb_logger)
+            self._log_confusion_matrix(preds, targets, logger=wandb_logger)
+            wandb_logger.experiment.log({f"epoch": trainer.current_epoch})
             self.preds.clear()
             self.targets.clear()
+            
+    def _log_per_class_scores(self, preds: np.ndarray, targets: np.ndarray, logger):
+        """
+        Generate f1, precision and recall heatmap
+        """
+
+        f1 = f1_score(preds, targets, average=None)
+        r = recall_score(preds, targets, average=None)
+        p = precision_score(preds, targets, average=None)
+#         import pdb; pdb.set_trace()
+        class_indices, support = np.unique(targets, return_counts=True)
+        if len(support) < len(p):
+            s = np.zeros_like(p)
+            for i, support_class_i in zip(class_indices, support):
+                s[i] = support_class_i
+            support = s
+            
+        data = [f1, p, r, support]
+
+        plt.figure(figsize=(20, 6))
+        sns.set(font_scale=1.2)
+        
+        annot = len(support) < 75
+
+        sns.heatmap(
+            data,
+            annot=annot,
+            vmin=0.0, vmax=1.0,
+            annot_kws={"size": 10},
+            fmt=".3f",
+            yticklabels=["F1", "Precision", "Recall", "Support"],
+        )
+
+        # names should be uniqe or else charts from different experiments in wandb will overlap
+        logger.experiment.log({f"val/per_class_f1_p_r_heatmap/{logger.experiment.name}": wandb.Image(plt)}, commit=False)
+
+        plt.clf()
+
+
+    def _log_confusion_matrix(self, preds: np.ndarray, targets: np.ndarray, logger):
+        """
+        Generate confusion_matrix heatmap
+        """
+        confusion_matrix = metrics.confusion_matrix(y_true=targets, y_pred=preds)
+        plt.figure(figsize=(14, 8))
+        sns.set(font_scale=1.4)
+        
+        annot = confusion_matrix.shape[0] < 75
+
+        sns.heatmap(confusion_matrix, annot=annot, annot_kws={"size": 8}, fmt="g")
+        # names should be uniqe or else charts from different experiments in wandb will overlap
+        logger.experiment.log({f"val/confusion_matrix/{logger.experiment.name}": wandb.Image(plt)}, commit=False)
+        plt.clf()
+
+        
+        
+        
+        
+###################################################
+
+
+
+import numpy as np
+import wandb
+# from wandb.keras import WandbCallback
+    
+from sklearn.metrics import confusion_matrix
+import plotly.graph_objs as go
+from plotly.subplots import make_subplots
+
+# source: https://colab.research.google.com/drive/1k89TDv8ybckgfVByUIhY6peBjtNGBH-k?usp=sharing#scrollTo=RO1MSGLeAzWp
+class WandbClassificationCallback(Callback):
+
+    def __init__(self, monitor='val_loss', verbose=0, mode='auto',
+                 save_weights_only=False, log_weights=False, log_gradients=False,
+                 save_model=True, training_data=None, validation_data=None,
+                 labels=[], data_type=None, predictions=1, generator=None,
+                 input_type=None, output_type=None, log_evaluation=False,
+                 validation_steps=None, class_colors=None, log_batch_frequency=None,
+                 log_best_prefix="best_", 
+                 log_confusion_matrix=False,
+                 confusion_examples=0, confusion_classes=5):
+        
+        super().__init__(monitor=monitor,
+                        verbose=verbose, 
+                        mode=mode,
+                        save_weights_only=save_weights_only,
+                        log_weights=log_weights,
+                        log_gradients=log_gradients,
+                        save_model=save_model,
+                        training_data=training_data,
+                        validation_data=validation_data,
+                        labels=labels,
+                        data_type=data_type,
+                        predictions=predictions,
+                        generator=generator,
+                        input_type=input_type,
+                        output_type=output_type,
+                        log_evaluation=log_evaluation,
+                        validation_steps=validation_steps,
+                        class_colors=class_colors,
+                        log_batch_frequency=log_batch_frequency,
+                        log_best_prefix=log_best_prefix)
+                        
+        self.log_confusion_matrix = log_confusion_matrix
+        self.confusion_examples = confusion_examples
+        self.confusion_classes = confusion_classes
+               
+    def on_epoch_end(self, epoch, logs={}):
+        if self.generator:
+            self.validation_data = next(self.generator)
+
+        if self.log_weights:
+            wandb.log(self._log_weights(), commit=False)
+
+        if self.log_gradients:
+            wandb.log(self._log_gradients(), commit=False)
+        
+        if self.log_confusion_matrix:
+            if self.validation_data is None:
+                wandb.termwarn(
+                    "No validation_data set, pass a generator to the callback.")
+            elif self.validation_data and len(self.validation_data) > 0:
+                wandb.log(self._log_confusion_matrix(), commit=False)                    
+
+        if self.input_type in ("image", "images", "segmentation_mask") or self.output_type in ("image", "images", "segmentation_mask"):
+            if self.validation_data is None:
+                wandb.termwarn(
+                    "No validation_data set, pass a generator to the callback.")
+            elif self.validation_data and len(self.validation_data) > 0:
+                if self.confusion_examples > 0:
+                    wandb.log({'confusion_examples': self._log_confusion_examples(
+                                                    confusion_classes=self.confusion_classes,
+                                                    max_confused_examples=self.confusion_examples)}, commit=False)
+                if self.predictions > 0:
+                    wandb.log({"examples": self._log_images(
+                        num_images=self.predictions)}, commit=False)
+
+        wandb.log({'epoch': epoch}, commit=False)
+        wandb.log(logs, commit=True)
+
+        self.current = logs.get(self.monitor)
+        if self.current and self.monitor_op(self.current, self.best):
+            if self.log_best_prefix:
+                wandb.run.summary["%s%s" % (self.log_best_prefix, self.monitor)] = self.current
+                wandb.run.summary["%s%s" % (self.log_best_prefix, "epoch")] = epoch
+                if self.verbose and not self.save_model:
+                    print('Epoch %05d: %s improved from %0.5f to %0.5f' % (
+                        epoch, self.monitor, self.best, self.current))
+            if self.save_model:
+                self._save_model(epoch)
+            self.best = self.current
+        
+    def _log_confusion_matrix(self):
+        x_val = self.validation_data[0]
+        y_val = self.validation_data[1]
+        y_val = np.argmax(y_val, axis=1)
+        y_pred = np.argmax(self.model.predict(x_val), axis=1)
+
+        confmatrix = confusion_matrix(y_pred, y_val, labels=range(len(self.labels)))
+        confdiag = np.eye(len(confmatrix)) * confmatrix
+        np.fill_diagonal(confmatrix, 0)
+
+        confmatrix = confmatrix.astype('float')
+        n_confused = np.sum(confmatrix)
+        confmatrix[confmatrix == 0] = np.nan
+        confmatrix = go.Heatmap({'coloraxis': 'coloraxis1', 'x': self.labels, 'y': self.labels, 'z': confmatrix,
+                                 'hoverongaps':False, 'hovertemplate': 'Predicted %{y}<br>Instead of %{x}<br>On %{z} examples<extra></extra>'})
+
+        confdiag = confdiag.astype('float')
+        n_right = np.sum(confdiag)
+        confdiag[confdiag == 0] = np.nan
+        confdiag = go.Heatmap({'coloraxis': 'coloraxis2', 'x': self.labels, 'y': self.labels, 'z': confdiag,
+                               'hoverongaps':False, 'hovertemplate': 'Predicted %{y} just right<br>On %{z} examples<extra></extra>'})
+
+        fig = go.Figure((confdiag, confmatrix))
+        transparent = 'rgba(0, 0, 0, 0)'
+        n_total = n_right + n_confused
+        fig.update_layout({'coloraxis1': {'colorscale': [[0, transparent], [0, 'rgba(180, 0, 0, 0.05)'], [1, f'rgba(180, 0, 0, {max(0.2, (n_confused/n_total) ** 0.5)})']], 'showscale': False}})
+        fig.update_layout({'coloraxis2': {'colorscale': [[0, transparent], [0, f'rgba(0, 180, 0, {min(0.8, (n_right/n_total) ** 2)})'], [1, 'rgba(0, 180, 0, 1)']], 'showscale': False}})
+
+        xaxis = {'title':{'text':'y_true'}, 'showticklabels':False}
+        yaxis = {'title':{'text':'y_pred'}, 'showticklabels':False}
+
+        fig.update_layout(title={'text':'Confusion matrix', 'x':0.5}, paper_bgcolor=transparent, plot_bgcolor=transparent, xaxis=xaxis, yaxis=yaxis)
+        
+        return {'confusion_matrix': wandb.data_types.Plotly(fig)}
+
+    def _log_confusion_examples(self, rescale=255, confusion_classes=5, max_confused_examples=3):
+            x_val = self.validation_data[0]
+            y_val = self.validation_data[1]
+            y_val = np.argmax(y_val, axis=1)
+            y_pred = np.argmax(self.model.predict(x_val), axis=1)
+
+            # Grayscale to rgb
+            if x_val.shape[-1] == 1:
+                x_val = np.concatenate((x_val, x_val, x_val), axis=-1)
+
+            confmatrix = confusion_matrix(y_pred, y_val, labels=range(len(self.labels)))
+            np.fill_diagonal(confmatrix, 0)
+
+            def example_image(class_index, x_val=x_val, y_pred=y_pred, y_val=y_val, labels=self.labels, rescale=rescale):
+                image = None
+                title_text = 'No example found'
+                color = 'red'
+
+                right_predicted_images = x_val[np.logical_and(y_pred==class_index, y_val==class_index)]
+                if len(right_predicted_images) > 0:
+                    image = rescale * right_predicted_images[0]
+                    title_text = 'Predicted right'
+                    color = 'rgb(46, 184, 46)'
+                else:
+                    ground_truth_images = x_val[y_val==class_index]
+                    if len(ground_truth_images) > 0:
+                        image = rescale * ground_truth_images[0]
+                        title_text = 'Example'
+                        color = 'rgb(255, 204, 0)'
+
+                return image, title_text, color
+
+            n_cols = max_confused_examples + 2
+            subplot_titles = [""] * n_cols
+            subplot_titles[-2:] = ["y_true", "y_pred"]
+            subplot_titles[max_confused_examples//2] = "confused_predictions"
+            
+            n_rows = min(len(confmatrix[confmatrix > 0]), confusion_classes)
+            fig = make_subplots(rows=n_rows, cols=n_cols, subplot_titles=subplot_titles)
+            for class_rank in range(1, n_rows+1):
+                indx = np.argmax(confmatrix)
+                indx = np.unravel_index(indx, shape=confmatrix.shape)
+                if confmatrix[indx] == 0:
+                    break
+                confmatrix[indx] = 0
+
+                class_pred, class_true = indx[0], indx[1]
+                mask = np.logical_and(y_pred==class_pred, y_val==class_true)
+                confused_images = x_val[mask]
+
+                # Confused images
+                n_images_confused = min(max_confused_examples, len(confused_images))
+                for j in range(n_images_confused):
+                    fig.add_trace(go.Image(z=rescale*confused_images[j],
+                                        name=f'Predicted: {self.labels[class_pred]} | Instead of: {self.labels[class_true]}',
+                                        hoverinfo='name', hoverlabel={'namelength' :-1}),
+                                row=class_rank, col=j+1)
+                    fig.update_xaxes(showline=True, linewidth=5, linecolor='red', row=class_rank, col=j+1, mirror=True)
+                    fig.update_yaxes(showline=True, linewidth=5, linecolor='red', row=class_rank, col=j+1, mirror=True)
+
+                # Comparaison images
+                for i, class_index in enumerate((class_true, class_pred)):
+                    col = n_images_confused+i+1
+                    image, title_text, color = example_image(class_index)
+                    fig.add_trace(go.Image(z=image, name=self.labels[class_index], hoverinfo='name', hoverlabel={'namelength' :-1}), row=class_rank, col=col)    
+                    fig.update_xaxes(showline=True, linewidth=5, linecolor=color, row=class_rank, col=col, mirror=True, title_text=title_text)
+                    fig.update_yaxes(showline=True, linewidth=5, linecolor=color, row=class_rank, col=col, mirror=True, title_text=self.labels[class_index])
+
+            fig.update_xaxes(showticklabels=False)
+            fig.update_yaxes(showticklabels=False)
+            
+            return wandb.data_types.Plotly(fig)

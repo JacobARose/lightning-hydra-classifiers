@@ -1,4 +1,4 @@
-from typing import Any, List, Optional, Dict
+from typing import Any, List, Optional, Dict, Tuple
 
 import torch
 from torch import nn, functional as F
@@ -9,8 +9,9 @@ import torchmetrics as metrics
 # from pytorch_lightning import metrics
 #.classification import Accuracy
 import timm
-# from lightning_hydra_classifiers.models.modules.simple_dense_net import SimpleDenseNet
+from torchsummary import summary
 import pandas as pd
+from pathlib import Path
 from stuf import stuf
 import wandb
 import numpy as np
@@ -21,59 +22,15 @@ import numpy as np
 
 
 
-# from pytorch_lightning.callbacks import Callback
 
-# class MyPrintingCallback(Callback):
 
-#     def on_init_start(self, trainer):
-#         print('Starting to init trainer!')
-
-#     def on_init_end(self, trainer):
-#         print('Trainer is init now')
-
-#     def on_train_end(self, trainer, pl_module):
-#         print('do something when training ends')
-
-from torchsummary import summary
 
 def display_model_params_requires_grad(model, prefix=''):
     for name, p in model.named_parameters():
         print(prefix + name, type(p), p.shape, f'requires_grad=={p.requires_grad}')
-
-
-
-class FCView(nn.Module):
-    def __init__(self):
-        super(FCView, self).__init__()
-
-    # noinspection PyMethodMayBeStatic
-    def forward(self, x):
-        n_b = x.data.size(0)
-        x = x.view(n_b, -1)
-        return x
-
-    def __repr__(self):
-        return 'view(nB, -1)'
-
-    
-class TeeHeads(nn.Module):
-    def __init__(self, *nets):
-        """Create multi-head network (multiple outputs)
-        :param nets: modules to form a Tee
-        :type nets: nn.Module
-        """
-        super(TeeHeads, self).__init__()
-        for idx, net in enumerate(nets):
-            self.add_module("{}".format(idx), net)
-
-    def forward(self, *inputs):
-        outputs = []
-        for module in self._modules.values():
-            outputs.append(module(*inputs))
-        return outputs
     
     
-    
+
     
     
     
@@ -88,12 +45,12 @@ def create_classifier(num_features: int, num_classes: int, pool_type='avg', bias
 
 
 def get_scalar_metrics(num_classes: int, average: str='macro', prefix: str=''):
-    default = {'acc/top1': metrics.Accuracy(top_k=1),
-               'acc/top3': metrics.Accuracy(top_k=3),
-               'precision/top1': metrics.Precision(num_classes=num_classes, top_k=1, average=average),
-               'precision/top3': metrics.Precision(num_classes=num_classes, top_k=3, average=average),
-               'recall/top1': metrics.Precision(num_classes=num_classes, top_k=1, average=average),
-               'recall/top3': metrics.Precision(num_classes=num_classes, top_k=3, average=average)}
+    default = {'acc_top1': metrics.Accuracy(top_k=1),
+               'acc_top3': metrics.Accuracy(top_k=3),
+               'precision_top1': metrics.Precision(num_classes=num_classes, top_k=1, average=average),
+#                'precision_top3': metrics.Precision(num_classes=num_classes, top_k=3, average=average),
+               'recall_top1': metrics.Recall(num_classes=num_classes, top_k=1, average=average)}#,
+#                'recall_top3': metrics.Recall(num_classes=num_classes, top_k=3, average=average)}
     if len(prefix)>0:
         for k in list(default.keys()):
             default[prefix + r'/' + k] = default[k]
@@ -120,21 +77,33 @@ import pdb
 class ResNet(LightningModule):
     example_input_size = (2, 3, 224, 224)
     def __init__(self,
-                 backbone_name: Optional[str]='resnet50',
+                 model_name: Optional[str]='resnet50',
                  num_classes: Optional[int]=1000,
+                 input_shape: Tuple[int]=(3,224,224),
                  optimizer=stuf({'name':"Adam", 'lr':0.01}),
                  seed: int=None): #, 'weight_decay':0.0})):
         super().__init__()
 #         pl.trainer.seed_everything(seed=seed)
         self.save_hyperparameters()
+        self.hparams.lr = optimizer.lr
         self.optimizer_hparams = stuf(optimizer)
         self.example_input_array = torch.rand(self.example_input_size)
-        assert 'resnet' in backbone_name
-        model = timm.create_model(backbone_name, pretrained=True)
+        assert 'resnet' in model_name
+        model = timm.create_model(model_name, pretrained=True)
         self.freeze(model)
-        for key, val in model.__dict__.items():
-            self.__dict__[key] = val
+        del model.fc
+#         for key, val in model.__dict__.items():
+#             self.__dict__[key] = val
+#         self.base_model = model
         self.relu = nn.ReLU()
+        
+        self.conv1 = model.conv1
+        self.bn1 = model.bn1
+        self.maxpool = model.maxpool
+        self.layer1 = model.layer1
+        self.layer2 = model.layer2
+        self.layer3 = model.layer3
+        self.layer4 = model.layer4
         
         self.stem = nn.Sequential(
                         self.conv1,
@@ -149,12 +118,16 @@ class ResNet(LightningModule):
                         self.layer3,
                         self.layer4
                         )
-        
+        self.num_features = model.num_features
+#         self.num_features = self._get_conv_output(input_shape)
+        self.input_shape = input_shape
+        print(self.num_features, self._get_conv_output(input_shape))
+
         self.reset_classifier(num_classes, global_pool='avg')
                 
         self.criterion = nn.CrossEntropyLoss()
         scalar_metrics = get_scalar_metrics(num_classes=num_classes)
-        vector_metrics = get_expensive_metrics(num_classes=num_classes, normalize=None, num_bins=100)
+#         vector_metrics = get_expensive_metrics(num_classes=num_classes, normalize=None, num_bins=100)
         
         self.train_metrics = scalar_metrics.clone(prefix='train/')
         self.val_metrics = scalar_metrics.clone(prefix='val/')
@@ -177,39 +150,42 @@ class ResNet(LightningModule):
         batch_size = 1
         input = torch.autograd.Variable(torch.rand(batch_size, *shape))
 
-        output_feat = self._forward_features(input)
+        output_feat = self.forward_features(input)
         n_size = output_feat.data.view(batch_size, -1).size(1)
         return n_size
     
-    def batch_loss(self, batch):
+    def step(self, batch, batch_idx):
         x, y = batch
         y_hat = self(x)
         loss = self.loss(y_hat, y)
-        return loss
-        
+        y_prob = self.probs(y_hat)
+        y_pred = torch.max(y_prob, dim=1)[1]
+        return {'loss':loss,
+                'log':{
+                       'y_prob':y_prob,
+                       'y_pred':y_pred,
+                       'y_true':y,
+                       'batch_idx':batch_idx
+                       }
+               }
+                
     def training_step(self, batch, batch_idx):      
         opt = self.optimizers()
-#         assert isinstance(opt, LightningOptimizer)
         x, y = batch
         y_hat = self(x)
-        loss = self.loss(y_hat, y)
         
-        def closure(opt):
-#             output = self(batch)
-#             loss = self.loss(y_hat, y)
+        def closure():#opt):
+            self._current_loss = self.loss(y_hat, y)
             opt.zero_grad()
-            self.manual_backward(loss)
+            self.manual_backward(self._current_loss)
 
-        closure(opt)
-        opt.step()
+        opt.step(closure=closure)
         
-#         print('x.shape:', x.shape, 'y_hat.shape:', y_hat.shape, 'y.shape:', y.shape)
-#         loss = self.loss(y_hat, y)
         y_prob = self.probs(y_hat)
         y_hat_int, y_pred = torch.max(y_prob, dim=1)
         
-        print(batch_idx, loss, y_pred[:5].cpu().numpy(), y[:5].cpu().numpy())        
-#         print(batch_idx, loss.item(), y_pred.cpu().numpy()[:5], y.cpu().numpy()[:5])
+        loss = self._current_loss.detach()
+        self.trainer.train_loop.running_loss.append(loss)
         return {'loss':loss,
                 'log':{
                        'train_loss':loss,
@@ -219,66 +195,58 @@ class ResNet(LightningModule):
                        'batch_idx':batch_idx
                        }
                }
-
-#     def backward(self, loss, optimizer, optimizer_idx):
-#         loss.backward()
-#         import pdb; pdb.set_trace()
-
-    def on_after_backward(self, training_step_output, batch_idx, untouched_loss):
-        print('Entered LightningModule method: lm.on_after_backward()')
-        print('Grad Norms:\n', self.grad_norm(2))        
-        print(self.device, 'self.training=', self.training)
-        summary(self, input_size=(3, 224, 224))
-        display_model_params_requires_grad(self)
-#         import pdb; pdb.set_trace()        
-        super().on_after_backward(training_step_output, batch_idx, untouched_loss)
+        
         
     def training_step_end(self, outputs):
-        super().training_step_end(outputs)
+        run = self.logger.experiment
         logs = outputs['log']
         loss = outputs['loss']
         idx = logs['batch_idx']
-#         self.log( on_step=True, on_epoch=True, prog_bar=True, logger=True, commit=False)
-#         self.log('train_loss', logs['train_loss'], on_step=True, on_epoch=True, prog_bar=True, logger=True)
-#         self.train_metrics(logs['y_prob'], logs['y_true'])
-#         self.train_metrics['scalar'](logs['y_prob'].cpu(), logs['y_true'].cpu())
-#         self.log_dict({'train/loss':loss,
-#                        'train/step':idx,
-#                        **self.train_metrics
-#                       },
-#                       on_step=True, on_epoch=True, logger=True, prog_bar=True)
-        
-        
         y_prob, y_pred, y = logs['y_prob'], logs['y_pred'], logs['y_true']
-        run = self.logger.experiment
-        run.log({'train/loss':loss,
-                 'train/step':idx,
-                 **self.train_metrics(y_prob, y),
-                 "train/logits":
-                 wandb.Histogram(np_histogram=np.histogram(y_pred.cpu())),
-                 "train/y":
-                 wandb.Histogram(np_histogram=np.histogram(y.cpu()))
+
+        self.log_dict(self.train_metrics(y_prob, y))
+
+        self.log('train/loss', loss,
+                 on_step=True,# on_epoch=True)#, 
+                 logger=True, prog_bar=True)
+        run.log({
+                 "train/y_pred":
+                 wandb.Histogram(np_histogram=np.histogram(y_pred.cpu(), bins=self.num_classes)),
+                 "train/y_true":
+                 wandb.Histogram(np_histogram=np.histogram(y.cpu(), bins=self.num_classes)),
+                "train/batch_idx":
+                 idx,
+                "global_step": self.trainer.global_step
                 })
 
-
-
-
-#         self.optimizers().zero_grad()
-#         self.manual_backward(loss)
-#         print(f'Finished manual backward step, loss: {loss.item()}')
-#         import pdb; pdb.set_trace()
-
         
-    def training_epoch_end(self, epoch_outputs):
+#         return {'loss':self._current_loss, #loss,
+#                 'log':{
+#                        'train_loss':self._current_loss, #loss,
+#                        'y_prob':y_prob,
+#                        'y_pred':y_pred,
+#                        'y_true':y,
+#                        'batch_idx':idx
+#                        }
+#                }
+        
+        
+        
+    def training_epoch_end(self, outputs):
+#         epoch_metrics = self.train_metrics.compute()
+#         self.log_dict(epoch_metrics)
+        self.log_dict(self.train_metrics)
+        
+#         self.log("train_acc", epoch_metrics["train/acc_top1"],
+#                  on_epoch=True, 
+#                  logger=True, prog_bar=True)
+        
         run = self.logger.experiment
-        run.log({k:v.cpu().numpy() for k,v in self.train_metrics.compute().items()})
-#         run.log({'train/loss_epoch':epoch_outputs['train/loss'],
-#                  **self.train_metrics.compute()})
-#         print(type(epoch_outputs))
-#         import pdb
-#         print(len(list(self.parameters())))
-#         print(len(self.get_trainable_parameters()))
-#         pdb.set_trace()
+        run.log({"epoch":self.trainer.current_epoch,
+                 "global_step": self.trainer.global_step})
+        
+#         self.train_metrics.reset()
+        
         
     def validation_step(self, batch, batch_idx):
         x, y = batch
@@ -301,56 +269,72 @@ class ResNet(LightningModule):
         loss = logs['val_loss']
         idx = logs['batch_idx']
         
-#         self.log('val/loss', logs['val_loss'], on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        y_prob, y_pred, y = logs['y_prob'], logs['y_pred'], logs['y_true']        
+
+        self.val_metrics(y_prob, y)
+#         for k in val_metrics_step.keys():
+#             self.log(k, val_metrics_step[k], on_step=True, on_epoch=False)        
+
+        self.log('val/loss',loss,
+                 on_step=True, on_epoch=True,
+                 logger=True, prog_bar=True)
         
-#         self.val_metrics(logs['y_prob'], logs['y_true'])
-#         self.log_dict(self.val_metrics, on_step=False, on_epoch=True, logger=True)#, prog_bar=True)
-        
-        
-        y_prob, y_pred, y = logs['y_prob'], logs['y_pred'], logs['y_true']
         run = self.logger.experiment
-        run.log({'val/loss_step':loss,
-                 'val/step':idx,
-                 **self.val_metrics(y_prob, y),
-                 "val/logits":
+        run.log({"val/y_pred":
                  wandb.Histogram(np_histogram=np.histogram(y_pred.cpu())),
-                 "val/y":
-                 wandb.Histogram(np_histogram=np.histogram(y.cpu()))
+                 "val/y_true":
+                 wandb.Histogram(np_histogram=np.histogram(y.cpu())),
+                 "val/batch_idx":
+                 idx,
+                 "global_step": self.trainer.global_step,
+                 **self.val_metrics(y_prob, y)
                 })
         
+    def validation_epoch_end(self, outputs):
+        self.log_dict(self.val_metrics.compute())
         
-        super().validation_step_end(outputs)
-            
-            
-    def validation_epoch_end(self, epoch_outputs):
         run = self.logger.experiment
-        print(len(epoch_outputs))
-#         import pdb; pdb.set_trace()
-        run.log({k:v.cpu().numpy() for k,v in self.val_metrics.compute().items()})
-#         run.log({'val/loss_epoch':torch.sum(['val/loss']),
-#                  **self.val_metrics.compute()})
+        run.log({"epoch":self.trainer.current_epoch,
+                 "global_step": self.trainer.global_step,})
+        
+        self.val_metrics.reset()
 
-            
+    def on_after_backward(self):
+        # example to inspect gradient information in tensorboard
+        if self.trainer.global_step % 25 == 0:  # don't make the tf file huge
+            for k, v in self.named_parameters():
+                self.logger.experiment.add_histogram(
+                    tag=f'grads/{k}', values=v.grad, global_step=self.trainer.global_step
+                )
             
     def test_step(self, batch, batch_idx):
         x, y = batch
-        out = self(x)
-        loss = self.loss(out, y)
+        y_hat = self(x)
+        loss = self.loss(y_hat, y)
 
-        # log 6 example images
         sample_imgs = x[:10]
-        grid = torchvision.utils.make_grid(sample_imgs).permute(1,2,0)
-        self.logger.experiment.log({"examples": [wandb.Image(grid, caption="test images")]})
+        grid = torchvision.utils.make_grid(sample_imgs).permute(1,2,0).cpu().numpy()
+        self.logger.experiment.log({"test/examples": [wandb.Image(grid, caption="test images")],
+                                    "global_step": self.trainer.global_step})
         
-        y_hat = torch.argmax(out, dim=1)
-        self.test_metrics(y_hat, y)
-        self.log_dict({'test_loss': loss, **self.test_metrics}, on_step=False, on_epoch=True, logger=True)
-                                   
-#         test_acc = torch.sum(true_preds).item() / (len(y) * 1.0)
+        y_pred = torch.argmax(y_hat, dim=1)
+        y_prob = self.probs(y_hat)
+#         self.test_metrics(y_hat, y)
+        self.log('test/loss', loss, logger=True)
+        
+        test_metrics_step = self.test_metrics(y_prob, y)
+        for k in test_metrics_step.keys():
+            self.log(k, test_metrics_step[k], logger=True) #, on_step=True, on_epoch=False)
+    
+        return test_metrics_step
 
-        # log the outputs!
-#         self.log_dict({'test_loss': loss, 'test_acc': test_acc}, logger=True)#, commit=False)
+    
+    def test_epoch_end(self, outputs):
         
+        self.log_dict(self.test_metrics.compute())
+        self.test_metrics.reset()
+    
+    
     @property
     def loss(self):
         return self.criterion
@@ -358,6 +342,17 @@ class ResNet(LightningModule):
     
     def probs(self, x):
         return x.softmax(dim=-1)
+    
+    
+    def predict(self, batch, batch_idx, dataloader_idx):
+        return (batch[0].detach().cpu(), self(batch[0]), *batch[1:])
+#         if len(batch)==3:
+#             return (self(batch[0]), *batch[1:])
+#             x, y, path = batch[0], batch[1], batch[2]
+#         elif len(batch)==2:
+#             x, y       = batch[0], batch[1]
+#         else:
+#             raise Exception(f'InvalidBatchShapeError: type(batch):{type(batch)}, len(batch):{len(batch)}')
 
     def reset_classifier(self, num_classes, global_pool: str='avg'):
         self.num_classes = num_classes
@@ -380,10 +375,25 @@ class ResNet(LightningModule):
         """
         return torch.optim.Adam(
                                 params=self.parameters(), 
-                                lr=self.hparams.optimizer.lr)#,
+                                lr=self.hparams.lr)#,
 #                                 weight_decay=self.hparams.optimizer.weight_decay
 #                             )
-# self.get_trainable_parameters(),
+
+    def save_model(self, path:str):
+        path = str(path)
+        if not Path(path).suffix=='.ckpt':
+            path = path + ".ckpt"
+        torch.save(self.state_dict(), path)
+        
+        
+    def load_model(self, path:str):
+        path = str(path)
+        if not Path(path).suffix=='.ckpt':
+            path = path + ".ckpt"
+        self.load_state_dict(torch.load(path))
+        
+
+
     def freeze(self, model):
         for param in model.parameters():
             param.requires_grad = False
@@ -416,6 +426,67 @@ class ResNet(LightningModule):
                 nn.init.constant_(m.bias, 0)
     
 
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+#     def on_after_backward(self, training_step_output, batch_idx, untouched_loss):
+#         print('Entered LightningModule method: lm.on_after_backward()')
+#         print('Grad Norms:\n', self.grad_norm(2))        
+#         print(self.device, 'self.training=', self.training)
+#         summary(self, input_size=(3, 224, 224))
+#         display_model_params_requires_grad(self)
+#         import pdb; pdb.set_trace()        
+#         super().on_after_backward(training_step_output, batch_idx, untouched_loss)
+
+            
+    
+    
+    
+    
+#         return {'hidden':logs}
+#         return logs #outputs[['y_pred', 'y_true']]
+#         super().validation_step_end(outputs)
+            
+            
+#     def validation_epoch_end(self, epoch_outputs):
+#         run = self.logger.experiment
+#         print(len(epoch_outputs))
+#         import pdb; pdb.set_trace()
+#         run.log({k:v.cpu().numpy() for k,v in self.val_metrics.compute().items()})
+#         run.log({'val/loss_epoch':torch.sum(['val/loss']),
+#                  **self.val_metrics.compute()})
+
+
+
+#     def batch_loss(self, batch):
+#         x, y = batch
+#         y_hat = self(x)
+#         loss = self.loss(y_hat, y)
+#         return loss
+
+    
+    
+    
+    
+    
     
 #     def loss(self, logits, labels):
 #         return self.criterion(logits, labels)
@@ -518,7 +589,35 @@ class ResNet(LightningModule):
 
 
 
+# class FCView(nn.Module):
+#     def __init__(self):
+#         super(FCView, self).__init__()
 
+#     # noinspection PyMethodMayBeStatic
+#     def forward(self, x):
+#         n_b = x.data.size(0)
+#         x = x.view(n_b, -1)
+#         return x
+
+#     def __repr__(self):
+#         return 'view(nB, -1)'
+
+    
+# class TeeHeads(nn.Module):
+#     def __init__(self, *nets):
+#         """Create multi-head network (multiple outputs)
+#         :param nets: modules to form a Tee
+#         :type nets: nn.Module
+#         """
+#         super(TeeHeads, self).__init__()
+#         for idx, net in enumerate(nets):
+#             self.add_module("{}".format(idx), net)
+
+#     def forward(self, *inputs):
+#         outputs = []
+#         for module in self._modules.values():
+#             outputs.append(module(*inputs))
+#         return outputs
 
 
 
