@@ -32,7 +32,16 @@ def display_model_params_requires_grad(model, prefix=''):
     
 
     
-    
+# 3.a Optional: Register a custom backbone
+# This is useful to create new backbone and make them accessible from `ImageClassifier`
+# @ImageClassifier.backbones(name="resnet18")
+def fn_resnet(pretrained: bool = True):
+    model = torchvision.models.resnet18(pretrained)
+    # remove the last two layers & turn it into a Sequential model
+    backbone = nn.Sequential(*list(model.children())[:-2])
+    num_features = model.fc.in_features
+    # backbones need to return the num_features to build the head
+    return backbone, num_features
     
     
 
@@ -80,6 +89,7 @@ class ResNet(LightningModule):
                  model_name: Optional[str]='resnet50',
                  num_classes: Optional[int]=1000,
                  input_shape: Tuple[int]=(3,224,224),
+                 batch_size: Optional[int]=None,
                  optimizer=stuf({'name':"Adam", 'lr':0.01}),
                  seed: int=None): #, 'weight_decay':0.0})):
         super().__init__()
@@ -122,12 +132,10 @@ class ResNet(LightningModule):
 #         self.num_features = self._get_conv_output(input_shape)
         self.input_shape = input_shape
         print(self.num_features, self._get_conv_output(input_shape))
-
         self.reset_classifier(num_classes, global_pool='avg')
                 
         self.criterion = nn.CrossEntropyLoss()
         scalar_metrics = get_scalar_metrics(num_classes=num_classes)
-#         vector_metrics = get_expensive_metrics(num_classes=num_classes, normalize=None, num_bins=100)
         
         self.train_metrics = scalar_metrics.clone(prefix='train/')
         self.val_metrics = scalar_metrics.clone(prefix='val/')
@@ -168,6 +176,7 @@ class ResNet(LightningModule):
                        'batch_idx':batch_idx
                        }
                }
+    
                 
     def training_step(self, batch, batch_idx):      
         opt = self.optimizers()
@@ -198,16 +207,18 @@ class ResNet(LightningModule):
         
         
     def training_step_end(self, outputs):
-        run = self.logger.experiment
+        run = self.logger.experiment[0]
         logs = outputs['log']
         loss = outputs['loss']
         idx = logs['batch_idx']
         y_prob, y_pred, y = logs['y_prob'], logs['y_pred'], logs['y_true']
 
-        self.log_dict(self.train_metrics(y_prob, y))
-
+        batch_metrics = self.train_metrics(y_prob, y)
+        self.log_dict(batch_metrics)
+        
+        self.log('train/acc', batch_metrics['train/acc_top1'], on_step=True, prog_bar=True)
         self.log('train/loss', loss,
-                 on_step=True,# on_epoch=True)#, 
+                 on_step=True,# on_epoch=True)#,
                  logger=True, prog_bar=True)
         run.log({
                  "train/y_pred":
@@ -218,30 +229,12 @@ class ResNet(LightningModule):
                  idx,
                 "global_step": self.trainer.global_step
                 })
-
-        
-#         return {'loss':self._current_loss, #loss,
-#                 'log':{
-#                        'train_loss':self._current_loss, #loss,
-#                        'y_prob':y_prob,
-#                        'y_pred':y_pred,
-#                        'y_true':y,
-#                        'batch_idx':idx
-#                        }
-#                }
-        
         
         
     def training_epoch_end(self, outputs):
-#         epoch_metrics = self.train_metrics.compute()
-#         self.log_dict(epoch_metrics)
         self.log_dict(self.train_metrics)
         
-#         self.log("train_acc", epoch_metrics["train/acc_top1"],
-#                  on_epoch=True, 
-#                  logger=True, prog_bar=True)
-        
-        run = self.logger.experiment
+        run = self.logger.experiment[0]
         run.log({"epoch":self.trainer.current_epoch,
                  "global_step": self.trainer.global_step})
         
@@ -271,7 +264,13 @@ class ResNet(LightningModule):
         
         y_prob, y_pred, y = logs['y_prob'], logs['y_pred'], logs['y_true']        
 
-        self.val_metrics(y_prob, y)
+        
+        
+        batch_metrics = self.val_metrics(y_prob, y)
+#         self.log_dict(batch_metrics)
+        
+        self.log('val/acc', batch_metrics['val/acc_top1'], on_step=True, prog_bar=True)
+
 #         for k in val_metrics_step.keys():
 #             self.log(k, val_metrics_step[k], on_step=True, on_epoch=False)        
 
@@ -279,7 +278,7 @@ class ResNet(LightningModule):
                  on_step=True, on_epoch=True,
                  logger=True, prog_bar=True)
         
-        run = self.logger.experiment
+        run = self.logger.experiment[0]
         run.log({"val/y_pred":
                  wandb.Histogram(np_histogram=np.histogram(y_pred.cpu())),
                  "val/y_true":
@@ -293,17 +292,18 @@ class ResNet(LightningModule):
     def validation_epoch_end(self, outputs):
         self.log_dict(self.val_metrics.compute())
         
-        run = self.logger.experiment
+        run = self.logger.experiment[0]
         run.log({"epoch":self.trainer.current_epoch,
                  "global_step": self.trainer.global_step,})
         
         self.val_metrics.reset()
 
+        
     def on_after_backward(self):
         # example to inspect gradient information in tensorboard
         if self.trainer.global_step % 25 == 0:  # don't make the tf file huge
             for k, v in self.named_parameters():
-                self.logger.experiment.add_histogram(
+                self.logger.experiment[0].add_histogram(
                     tag=f'grads/{k}', values=v.grad, global_step=self.trainer.global_step
                 )
             
@@ -314,7 +314,7 @@ class ResNet(LightningModule):
 
         sample_imgs = x[:10]
         grid = torchvision.utils.make_grid(sample_imgs).permute(1,2,0).cpu().numpy()
-        self.logger.experiment.log({"test/examples": [wandb.Image(grid, caption="test images")],
+        self.logger.experiment[0].log({"test/examples": [wandb.Image(grid, caption="test images")],
                                     "global_step": self.trainer.global_step})
         
         y_pred = torch.argmax(y_hat, dim=1)
@@ -346,13 +346,7 @@ class ResNet(LightningModule):
     
     def predict(self, batch, batch_idx, dataloader_idx):
         return (batch[0].detach().cpu(), self(batch[0]), *batch[1:])
-#         if len(batch)==3:
-#             return (self(batch[0]), *batch[1:])
-#             x, y, path = batch[0], batch[1], batch[2]
-#         elif len(batch)==2:
-#             x, y       = batch[0], batch[1]
-#         else:
-#             raise Exception(f'InvalidBatchShapeError: type(batch):{type(batch)}, len(batch):{len(batch)}')
+
 
     def reset_classifier(self, num_classes, global_pool: str='avg'):
         self.num_classes = num_classes
@@ -366,6 +360,7 @@ class ResNet(LightningModule):
                                         )
         self.initialize_weights(self.classifier)
 
+        
     def configure_optimizers(self):
         """Choose what optimizers and learning-rate schedulers to use in your optimization.
         Normally you'd need one. But in the case of GANs or similar you might have multiple.
@@ -375,9 +370,9 @@ class ResNet(LightningModule):
         """
         return torch.optim.Adam(
                                 params=self.parameters(), 
-                                lr=self.hparams.lr)#,
-#                                 weight_decay=self.hparams.optimizer.weight_decay
-#                             )
+                                lr=self.hparams.lr,
+                                weight_decay=self.hparams.optimizer.weight_decay
+                                )
 
     def save_model(self, path:str):
         path = str(path)

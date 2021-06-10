@@ -9,8 +9,14 @@ max_epochs: 40
 weights_summary: "top"
 progress_bar_refresh_rate: 10
 
+profiler: "simple"
+log_every_n_steps: 50 
 terminate_on_nan: False
 
-auto_scale_batch_size: False
-auto_lr_find: False
-# auto_lr_num_samples: 100
+fast_dev_run: false
+limit_train_batches: 1.0
+limit_val_batches: 1.0
+
+# auto_scale_batch_size: False
+# auto_lr_find: False
+# auto_lr_num_training: 100

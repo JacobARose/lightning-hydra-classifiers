@@ -1,0 +1,13 @@
+options:
+    lr:
+        force_rerun: false
+
+trainer_kwargs:
+    auto_lr_find: true
+
+tuner_kwargs:
+    lr:
+        min_lr: 1e-08
+        max_lr: 1
+        num_training: 100
+        mode: 'exponential'

@@ -2,8 +2,9 @@ _target_: lightning_hydra_classifiers.models.resnet.ResNet
 
 
 name: "resnet50"
-num_classes: null
-input_shape: [3, 224, 224]
+num_classes: '${datamodule.num_classes}'
+input_shape: [3, '${datamodule.image_size}', '${datamodule.image_size}']
+batch_size: '${datamodule.batch_size}'
 optimizer:
     _target_: torch.optim.Adam
     
@@ -16,3 +17,4 @@ unfreeze: ["layer4"]
 root_dir: ${oc.env:WANDB_CACHE_DIR}
 model_dir: ${.root_dir}/models/${.name} # null
 model_path: ${.model_dir}/best_model.pkl # null
+lr: ${.optimizer.lr}

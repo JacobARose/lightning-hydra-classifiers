@@ -2,20 +2,24 @@ _target_: lightning_hydra_classifiers.models.resnet.ResNet
 
 
 basename: "resnet50"
-name: ${.basename}_${datamodule.image_size}
-num_classes: '${datamodule.num_classes}'
-input_shape: [3, '${datamodule.image_size}', '${datamodule.image_size}']
-batch_size: '${datamodule.batch_size}'
+name: ${.basename}_${datamodule.name} # image_size}
+
 optimizer:
     _target_: torch.optim.Adam
     
     name: "Adam"
     lr: 0.001
     weight_decay: 0.0
-    
+
+num_classes: '${datamodule.num_classes}'
+input_shape: [3, '${datamodule.image_size}', '${datamodule.image_size}']
+batch_size: '${datamodule.batch_size}'
+lr: '${.optimizer.lr}'
+
+
 head: ["avg_pool","flatten","fc"]
 unfreeze: ["layer4"]
+
 root_dir: ${oc.env:WANDB_CACHE_DIR}
 model_dir: ${.root_dir}/models/${.name} # null
 model_path: ${.model_dir}/best_model.pkl # null
-lr: ${.optimizer.lr}

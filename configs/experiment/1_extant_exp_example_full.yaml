@@ -5,14 +5,19 @@
 # 
 
 # to execute this experiment run:
-# python run.py +experiment=1_pnas_exp_example_full
+# python run.py +experiment=1_extant_exp_example_full
 
 defaults:
+#     - override /logger: many_loggers.yaml
+
+    - override /hydra/hydra_logging: colorlog
+    - override /hydra/job_logging: colorlog
+    
     - override /trainer: null  # override trainer to null so it's not loaded from main config defaults...
     - override /model: resnet_model.yaml
-    - override /datamodule: pnas_datamodule.yaml
+    - override /datamodule: extant_datamodule.yaml
     - override /callbacks: wandb_callbacks.yaml # default_callbacks.yaml  # set this to null if you don't want to use callbacks
-    - override /logger: many_loggers.yaml
+
 
 # we override default configurations with nulls to prevent them from loading at all
 # instead we define all modules and their paths directly in this config,
@@ -23,7 +28,8 @@ seed: 12345
 trainer:
     _target_: pytorch_lightning.Trainer
     gpus: 1
-
+    precision: 16
+#     accelerator: 'ddp'
     min_epochs: 1
     max_epochs: 40
 
@@ -37,6 +43,7 @@ trainer:
     fast_dev_run: false
     limit_train_batches: 1.0
     limit_val_batches: 1.0
+    
     # resume_from_checkpoint: ${work_dir}/last.ckpt
 
 

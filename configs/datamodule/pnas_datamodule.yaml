@@ -1,8 +1,17 @@
 _target_: contrastive_learning.data.pytorch.pnas.PNASLightningDataModule
 
-name: "PNAS_family_100_512"
-batch_size: 32
-val_split: 0.2
-num_workers: 4
+basename: "PNAS"
+name: '${.basename}_family_100_512'
+batch_size: 256
+val_split: 0.0
+num_classes: null
+image_size: 512
+channels: 3
+class_type: "family"
+normalize: true
 seed: 98568764
-
+predict_on_split: "val"
+debug: false
+num_workers: 4
+root_dir: ${root_dir}
+dataset_dir: ${.root_dir}/datasets/${.name}
