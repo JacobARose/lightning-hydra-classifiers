@@ -28,7 +28,7 @@ seed: 12345
 trainer:
     _target_: pytorch_lightning.Trainer
     gpus: 1
-    precision: 16
+#     precision: 16
 #     accelerator: 'ddp'
     min_epochs: 1
     max_epochs: 40
