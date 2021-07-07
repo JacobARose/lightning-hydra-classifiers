@@ -52,7 +52,7 @@ class SimpleMLP(nn.Module):
 
 class MTSimpleMLP(nn.Module, MultiTaskModule):
     def __init__(self,
-                 input_size=, 
+                 input_size=4096, 
                  hidden_size=512):
         """
             Multi-task MLP with multi-head classifier.

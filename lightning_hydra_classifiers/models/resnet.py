@@ -91,7 +91,8 @@ class ResNet(LightningModule):
                  input_shape: Tuple[int]=(3,224,224),
                  batch_size: Optional[int]=None,
                  optimizer=stuf({'name':"Adam", 'lr':0.01}),
-                 seed: int=None): #, 'weight_decay':0.0})):
+                 seed: int=None,
+                 **kwargs): #, 'weight_decay':0.0})):
         super().__init__()
 #         pl.trainer.seed_everything(seed=seed)
         self.save_hyperparameters()
@@ -264,8 +265,6 @@ class ResNet(LightningModule):
         
         y_prob, y_pred, y = logs['y_prob'], logs['y_pred'], logs['y_true']        
 
-        
-        
         batch_metrics = self.val_metrics(y_prob, y)
 #         self.log_dict(batch_metrics)
         
