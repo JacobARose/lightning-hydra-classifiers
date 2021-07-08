@@ -66,7 +66,12 @@ def extras(config: DictConfig) -> None:
         log.info("Forcing ddp friendly configuration! <config.trainer.accelerator=ddp>")
         # ddp doesn't like num_workers>0 or pin_memory=True
         if config.datamodule.get("num_workers"):
-            config.datamodule.num_workers = 0
+#             config.datamodule.num_workers = 0
+            gpus = config.trainer.get("gpus")
+            if isinstance(gpus, list):
+                config.datamodule.num_workers = 4 * len(gpus)
+            elif isinstance(gpus, int):
+                config.datamodule.num_workers = 4
         if config.datamodule.get("pin_memory"):
             config.datamodule.pin_memory = False
 
@@ -86,6 +91,7 @@ def print_config(
         "seed",
     ),
     resolve: bool = True,
+    file: str = None
 ) -> None:
     """Prints content of DictConfig using Rich library and its tree structure.
 
@@ -109,7 +115,7 @@ def print_config(
 
         branch.add(Syntax(branch_content, "yaml"))
 
-    rich.print(tree)
+    rich.print(tree, file=file)
 
 
 def empty(*args, **kwargs):

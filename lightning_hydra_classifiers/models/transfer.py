@@ -100,20 +100,7 @@ class MilestonesFinetuning(BaseFinetuning):
 
         modules = list(modules.values())        
 
-#         modules = dict(pl_module.feature_extractor.named_parameters())
-        
-#         num_params = len(modules)
-        
-#         for k in list(modules.keys()):
-#             for l in unfreeze_layers:
-#                 if k.startswith(l):
-#                     modules.pop(k)
-
-#         modules = list(modules.values())        
-        
-#         print(dict(pl_module.feature_extractor.named_parameters()).keys())
-#         import pdb; pdb.set_trace()
-        print(f'Freezing {len(modules)} layers before training, out of {num_params}. Unfrozen layer names: {unfreeze_layers}')
+        log.info(f'Freezing {len(modules)} layers before training, out of {num_params}. Unfrozen layer names: {unfreeze_layers}')
 
         self.freeze(modules=nn.Sequential(*modules), train_bn=self.train_bn)
 
@@ -162,7 +149,7 @@ class TransferLearningModel(BaseLightningModule):
                  optimizer: str = "Adam",
                  lr: float = 1e-3,
                  lr_scheduler_gamma: float = 1e-1,
-                 num_workers: int = 6,
+#                  num_workers: int = 6,
                  **kwargs
                  ) -> None:
         """TransferLearningModel
@@ -181,13 +168,15 @@ class TransferLearningModel(BaseLightningModule):
         super().__init__()
         self.classifier = classifier
         self.num_classes = classifier.num_classes
+        
         self.train_bn = train_bn
         self.milestones = milestones
         self.batch_size = batch_size
-        self.optimizer_func = getattr(optim, optimizer)
         self.lr = lr
         self.lr_scheduler_gamma = lr_scheduler_gamma
-        self.num_workers = num_workers
+        self.optimizer_func = getattr(optim, optimizer)
+
+#         self.num_workers = num_workers
 
         self._build_classifier()
         self._init_metrics('all')
@@ -198,7 +187,6 @@ class TransferLearningModel(BaseLightningModule):
         """Define model layers & loss."""
         if self.classifier is None:
             self.classifier = self.classifier_factory()
-#         classifier_args = self.classifier.get_parser_args()
         self.feature_extractor = self.classifier.backbone
     
         self.fc = self.classifier.head        
@@ -222,6 +210,7 @@ class TransferLearningModel(BaseLightningModule):
             f"The model will start training with only {len(trainable_parameters)} "
             f"trainable parameters out of {len(parameters)}."
         )
+        log.info(f"self.lr={self.lr}")
         optimizer = self.optimizer_func(trainable_parameters, lr=self.lr)
         scheduler = MultiStepLR(optimizer, milestones=self.milestones, gamma=self.lr_scheduler_gamma)
         return [optimizer], [scheduler]
@@ -421,8 +410,8 @@ def setup_train(data_config,
                                   batch_size = data_config.batch_size,
                                   optimizer = "Adam",
                                   lr = model_config.lr,
-                                  lr_scheduler_gamma = model_config.lr_scheduler_gamma,
-                                  num_workers = 6,
+                                  lr_scheduler_gamma = model_config.lr_scheduler_gamma
+#                                   num_workers = 6,
                                  )
     
     loggers = [pl.loggers.wandb.WandbLogger(

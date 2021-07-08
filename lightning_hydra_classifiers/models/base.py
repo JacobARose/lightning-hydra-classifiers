@@ -240,7 +240,8 @@ class BaseLightningModule(pl.LightningModule):
         self.log('train/loss', loss,
                  on_step=True,# on_epoch=True)#,
                  logger=True, 
-                 prog_bar=True)
+                 prog_bar=True
+                )
         
         return outputs
         
@@ -278,16 +279,13 @@ class BaseLightningModule(pl.LightningModule):
 
         self.log('val/loss',loss,
                  on_step=True, on_epoch=True,
-                 logger=True, prog_bar=True)
+                 logger=True, prog_bar=True,
+                 sync_dist=True)
 
         return outputs
-#         self.log('val/acc',
-#                  self.val_metrics['val/acc_top1'],
-#                  on_step=True, 
-#                  on_epoch=True,
-#                  prog_bar=True)
 
 
+    
 
 
 

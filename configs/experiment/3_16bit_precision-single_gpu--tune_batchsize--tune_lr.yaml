@@ -1,0 +1,176 @@
+# @package _global_
+
+# Created Tuesday, April 20th, 2021
+# Author: Jacob A Rose
+# 
+
+# to execute this experiment run:
+# python run.py +experiment=1_extant_exp_example_full
+
+defaults:
+#     - override /logger: many_loggers.yaml
+    - override /hydra/hydra_logging: colorlog
+    - override /hydra/job_logging: colorlog
+
+
+# hydra:
+#     run:
+#         dir: ./outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}
+
+job_type: "${datamodule.name}_tune-train-test"
+root_dir: ${oc.env:WANDB_CACHE_DIR}
+work_dir: "/media/data_cifs/projects/prj_fossils/users/jacob/experiments/July2021-Nov2021"
+
+job_dir: "${work_dir}/${job_type}"
+log_dir: "${job_dir}/${now:%Y-%m-%d}/${now:%H-%M-%S}/"
+# results_dir: '${model.model_dir}/results'
+seed: 12345
+print_config: true
+
+
+hparams_log_path: '${job_dir}/hparams/best_hparams.yaml'
+hparams:
+    batch_size: 'default' #null
+    lr: 'default' #null # base learning rate
+    num_classes: null
+    classes: null
+    class_type: "family"
+    image_size: 1024
+
+##################################
+##################################
+
+datamodule:
+#     _target_: contrastive_learning.data.pytorch.pnas.PNASLightningDataModule
+    _target_: contrastive_learning.data.pytorch.datamodules.build_datamodule
+#     basename: "PNAS"
+#     name: '${.basename}_family_100_${.image_size}'
+    basename: "Extant"
+    name: '${.basename}_family_10_${.image_size}'
+    batch_size: '${hparams.batch_size}'
+    val_split: 0.2
+    classes: '${hparams.classes}'
+    num_classes: '${hparams.num_classes}'
+    image_size: '${hparams.image_size}'
+    channels: 3
+    class_type: '${hparams.class_type}'
+    normalize: true
+    seed: '${seed}'
+    predict_on_split: "val"
+    num_workers: 0
+    root_dir: ${root_dir}
+    dataset_dir: ${.root_dir}/datasets/${.name}
+
+##################################
+##################################
+
+model:
+    _target_: lightning_hydra_classifiers.models.transfer.TransferLearningModel
+    
+    classifier:
+        _target_: lightning_hydra_classifiers.models.transfer.Classifier
+        backbone_name: 'resnet50'
+        num_classes: '${hparams.num_classes}'
+        finetune: true
+
+    train_bn: '${callbacks.finetuning.train_bn}'
+    milestones: '${callbacks.finetuning.milestones}'
+    batch_size: '${hparams.batch_size}'
+    optimizer: "Adam"
+    lr: '${hparams.lr}'
+    lr_scheduler_gamma: 0.1
+#     num_workers: 6
+
+
+##################################
+##################################
+
+tuner:
+    instantiate:
+        _target_: pytorch_lightning.tuner.tuning.Tuner
+        # pass in the trainer
+        
+    options:
+        force_rerun: false
+    
+    scale_batch_size:
+        log_name: 'tuned_batch_size'
+#         log_path: '${log_dir}/hparams/${.log_name}.yaml'
+        kwargs:
+            mode: 'power'
+            steps_per_trial: 3
+            init_val: 4
+            max_trials: 25
+            batch_arg_name: 'batch_size'
+        tuned: false
+    # `batch_arg_name` should be the name of an attribute in one of the following:
+    # model
+    # model.hparams
+    # model.datamodule
+    # trainer.datamodule (the datamodule passed to the tune method)
+    
+    
+    lr_find:
+        log_name: 'tuned_learning_rate'
+#         log_path: '${log_dir}/hparams/${.log_name}.yaml'
+        kwargs:
+            min_lr: 1e-08
+            max_lr: 1
+            num_training: 100
+            mode: 'exponential'
+            early_stop_threshold: 4.0
+        tuned: false
+
+
+trainer:
+    _target_: pytorch_lightning.Trainer
+    gpus: [2]
+    auto_select_gpus: true
+#     precision: 16
+    accelerator: 'dp'
+    min_epochs: 1
+    max_epochs: 15
+
+    weights_summary: "top"
+#     progress_bar_refresh_rate: 10
+
+    profiler: "simple"
+    log_every_n_steps: 50 
+#     terminate_on_nan: False
+
+#     fast_dev_run: false
+#     limit_train_batches: 1.0
+#     limit_val_batches: 1.0
+    
+    amp_backend: "native"
+    amp_level: "02"
+    precision: 16
+    # resume_from_checkpoint: ${work_dir}/last.ckpt
+
+
+callbacks:
+    finetuning:
+        _target_: lightning_hydra_classifiers.models.transfer.MilestonesFinetuning
+        milestones: [5, 10]
+        train_bn: false
+
+
+logger:
+    wandb:
+        _target_: pytorch_lightning.loggers.wandb.WandbLogger
+        entity: '${oc.env:WANDB_ENTITY}' # "jrose"
+        project: "mnist_scaling_experiments"
+        job_type: '${job_type}'
+        group: "single-gpu"
+#         magic: true
+        mode: "online" # "offline" # "disabled"
+        allow_val_change: true
+        sync_tensorboard: true
+#         id: 
+#         resume: 
+
+    tensorboard:
+        _target_: pytorch_lightning.loggers.tensorboard.TensorBoardLogger
+        save_dir: "${log_dir}/tensorboard/"
+        name: "${job_type}_${datamodule.name}"
+

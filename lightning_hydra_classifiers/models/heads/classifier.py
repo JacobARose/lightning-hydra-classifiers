@@ -64,9 +64,9 @@ class Classifier(BaseModule):
                  bottleneck: Optional[nn.Module] = None,
                  head: Optional[nn.Module] = None,
                  finetune: bool=True):
-        
+
+        self.num_classes = num_classes
         super(Classifier, self).__init__()
-        self.num_classes = num_classes        
         
         if backbone is None:
             backbone = self.build_backbone(name=backbone_name,

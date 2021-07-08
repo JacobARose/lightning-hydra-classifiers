@@ -101,67 +101,11 @@ model:
 
 
 
-
-
 callbacks:
     finetuning:
         _target_: lightning_hydra_classifiers.models.transfer.MilestonesFinetuning
         milestones: [5, 10]
-        train_bn: false    
-    
-
-#     basename: "resnet50"
-#     name: ${.basename}_${datamodule.image_size}
-#     num_classes: '${datamodule.num_classes}'
-#     input_shape: ['${datamodule.channels}', '${datamodule.image_size}', '${datamodule.image_size}']
-#     batch_size: '${datamodule.batch_size}'
-#     optimizer:
-# #         _target_: torch.optim.Adam
-#         name: "Adam"
-#         lr: 0.001
-#         weight_decay: 0.0
-
-#     head: ["avg_pool","flatten","fc"]
-#     unfreeze: ["layer4"]
-#     root_dir: ${oc.env:WANDB_CACHE_DIR}
-#     model_dir: ${.root_dir}/models/${.name} # null
-#     model_path: ${.model_dir}/best_model.pkl # null
-#     lr: ${.optimizer.lr}
-
-
-
-
-
-
-
-
-# model:
-#     _target_: lightning_hydra_classifiers.models.resnet.ResNet
-
-#     basename: "resnet50"
-#     name: ${.basename}_${datamodule.image_size}
-#     num_classes: '${datamodule.num_classes}'
-#     input_shape: ['${datamodule.channels}', '${datamodule.image_size}', '${datamodule.image_size}']
-#     batch_size: '${datamodule.batch_size}'
-#     optimizer:
-# #         _target_: torch.optim.Adam
-#         name: "Adam"
-#         lr: 0.001
-#         weight_decay: 0.0
-
-#     head: ["avg_pool","flatten","fc"]
-#     unfreeze: ["layer4"]
-#     root_dir: ${oc.env:WANDB_CACHE_DIR}
-#     model_dir: ${.root_dir}/models/${.name} # null
-#     model_path: ${.model_dir}/best_model.pkl # null
-#     lr: ${.optimizer.lr}
-
-
-
-
-
-
-
+        train_bn: false
 
 job_type: "tune-train-test"
 
