@@ -201,14 +201,15 @@ class BaseLightningModule(pl.LightningModule):
         y_hat = self(x)
         loss = self.loss(y_hat, y)
         
-        y_prob = self.probs(y_hat)
-        y_pred = torch.max(y_prob, dim=1)[1]
+#         y_prob = self.probs(y_hat)
+#         y_pred = torch.max(y_prob, dim=1)[1]
         
         return {'loss':loss,
                 'log':{
                        'train_loss':loss,
-                       'y_prob':y_prob,
-                       'y_pred':y_pred,
+                        'y_hat':y_hat,
+#                        'y_prob':y_prob,
+#                        'y_pred':y_pred,
                        'y_true':y,
                        'batch_idx':batch_idx
                        }
@@ -218,7 +219,11 @@ class BaseLightningModule(pl.LightningModule):
         logs = outputs['log']
         loss = outputs['loss']
         idx = logs['batch_idx']
-        y_prob, y_pred, y = logs['y_prob'], logs['y_pred'], logs['y_true']
+#         y_prob, y_pred, y = logs['y_prob'], logs['y_pred'], logs['y_true']
+        y_hat, y = logs['y_hat'], logs['y_true']
+        
+        y_prob = self.probs(y_hat)
+        y_pred = torch.max(y_prob, dim=1)[1]
         
         batch_metrics = self.metrics_train(y_prob, y)
         
@@ -254,8 +259,9 @@ class BaseLightningModule(pl.LightningModule):
         return {'loss':loss,
                 'log':{
                        'val_loss':loss,
-                       'y_prob':y_prob,
-                       'y_pred':y_pred,
+                       'y_hat':y_hat,
+#                        'y_prob':y_prob,
+#                        'y_pred':y_pred,
                        'y_true':y,
                        'batch_idx':batch_idx
                        }
@@ -265,7 +271,12 @@ class BaseLightningModule(pl.LightningModule):
         
         logs = outputs['log']
         loss = logs['val_loss']
-        y_prob, y_pred, y = logs['y_prob'], logs['y_pred'], logs['y_true']
+#         y_prob, y_pred, y = logs['y_prob'], logs['y_pred'], logs['y_true']
+        
+        y_hat, y = logs['y_hat'], logs['y_true']
+        y_prob = self.probs(y_hat)
+        y_pred = torch.max(y_prob, dim=1)[1]
+        
         batch_metrics = self.metrics_val(y_prob, y)
         
         for k in self.metrics_val.keys():
