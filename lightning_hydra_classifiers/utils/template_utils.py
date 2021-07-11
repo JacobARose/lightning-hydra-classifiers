@@ -1,7 +1,7 @@
 import logging
 import warnings
 from typing import List, Sequence
-
+import os
 import pytorch_lightning as pl
 import rich
 import wandb
@@ -10,7 +10,7 @@ from pytorch_lightning.loggers.wandb import WandbLogger
 from pytorch_lightning.utilities import rank_zero_only
 from rich.syntax import Syntax
 from rich.tree import Tree
-
+import hydra
 
 def get_logger(name=__name__, level=logging.INFO):
     """Initializes python logger."""
@@ -170,12 +170,26 @@ def log_hyperparameters(
 
     # send hparams to all loggers
     trainer.logger.log_hyperparams(hparams)
+    
+    
+    if 'wandb' in config.logger.keys():
+        wandb.watch(model.classifier, criterion=model.criterion, log='all')
+        log.info(f'Logging classifier gradients to wandb using wandb.watch()')
 
     # disable logging any more hyperparameters for all loggers
     # (this is just a trick to prevent trainer from logging hparams of model, since we already did that above)
     trainer.logger.log_hyperparams = empty
 
 
+# @rank_zero_only
+def init(config: DictConfig):
+    
+    if wandb.run is None:
+        local_rank = os.environ.get("LOCAL_RANK", 0)
+        print(f'local_rank={local_rank}')
+        hydra.utils.instantiate(config.wandb.init)
+        print(f'Just may have successfully initiated wandb')
+    
 def finish(
     config: DictConfig,
     model: pl.LightningModule,

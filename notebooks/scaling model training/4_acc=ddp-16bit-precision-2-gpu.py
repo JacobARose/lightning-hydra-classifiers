@@ -3,7 +3,7 @@
 
 """
 
-python "/media/data/jacob/GitHub/lightning-hydra-classifiers/notebooks/scaling model training/4_acc=ddp-16bit-precision-2-gpu_tune-batchsize--tune_lr.py"
+python "/media/data/jacob/GitHub/lightning-hydra-classifiers/notebooks/scaling model training/4_acc=ddp-16bit-precision-2-gpu.py"
 
 """
 
@@ -32,7 +32,7 @@ python "/media/data/jacob/GitHub/lightning-hydra-classifiers/notebooks/scaling m
 
 
 from typing import Any, List, Optional
-from pytorch_lightning.metrics.classification import Accuracy
+# from pytorch_lightning.metrics.classification import Accuracy
 
 import shutil
 import os
@@ -55,12 +55,17 @@ from omegaconf import OmegaConf, DictConfig
 from pathlib import Path
 from rich.logging import RichHandler
 
-
-
-
 import dotenv
 import hydra
 from omegaconf import DictConfig, OmegaConf
+
+from pytorch_lightning import LightningModule, LightningDataModule, Callback, Trainer
+from pytorch_lightning.loggers import LightningLoggerBase
+from pytorch_lightning import seed_everything
+
+log = template_utils.get_logger(__name__)
+
+
 
 # load environment variables from `.env` file if it exists
 # recursively searches for `.env` in all folders starting from work dir
@@ -95,16 +100,6 @@ def main(config: DictConfig):
 
 
 
-from pytorch_lightning import LightningModule, LightningDataModule, Callback, Trainer
-from pytorch_lightning.loggers import LightningLoggerBase
-from pytorch_lightning import seed_everything
-
-import hydra
-from omegaconf import DictConfig
-
-from lightning_hydra_classifiers.utils import template_utils
-
-log = template_utils.get_logger(__name__)
 
 
 def train(config: DictConfig) -> Optional[float]:
@@ -124,8 +119,11 @@ def train(config: DictConfig) -> Optional[float]:
 
     os.makedirs(config.log_dir, exist_ok=True)
 
+    template_utils.init(config)
+    
     datamodule, config = configure_datamodule(config)    
 #     template_utils.print_config(config, resolve=True)
+
     model = configure_model(config)
 
     trainer = configure_trainer(config)
@@ -239,7 +237,10 @@ def read_hydra_config(config_dir: str,
 def configure_datamodule(config: DictConfig) -> pl.LightningDataModule:
     log.info(f"Instantiating datamodule <{config.datamodule._target_}>")
     datamodule: pl.LightningDataModule = hydra.utils.instantiate(config.datamodule)
+
         
+#     import pdb; pdb.set_trace()
+
     try:
         datamodule.setup(stage="fit")
         config.hparams.classes = datamodule.classes
@@ -255,6 +256,12 @@ def configure_model(config: DictConfig) -> pl.LightningModule:
     log.info(f"Instantiating model <{config.model._target_}>")
     model: pl.LightningModule = hydra.utils.instantiate(config.model)
     
+    if hasattr(config.hparams.classes, "__len__"):
+        model.classes = config.hparams.classes
+        log.info(f'Stored {len(model.classes)} class names in the lightning module')
+    else:
+        model.classes = []
+        print(f'proceeding with empty class list in model obj')
     return model
 
 
@@ -279,6 +286,7 @@ def configure_trainer(config: DictConfig) -> pl.Trainer:
                 log.info(f"Instantiating callback <{cb_conf._target_}>")
                 if cb_name == "wandb":
                     callbacks.append(hydra.utils.instantiate(cb_conf, config=OmegaConf.to_container(config, resolve=True)))
+                    
                 else:
                     callbacks.append(hydra.utils.instantiate(cb_conf))
 
@@ -302,7 +310,7 @@ def configure_trainer(config: DictConfig) -> pl.Trainer:
 if __name__ == "__main__":
 
 
-    config_path = "/media/data/jacob/GitHub/lightning-hydra-classifiers/configs/experiment/4_acc=ddp-16bit-precision-2-gpu_tune-batchsize--tune_lr.ipynb"
+    config_path = "/media/data/jacob/GitHub/lightning-hydra-classifiers/configs/experiment/4_acc=ddp-16bit-precision-2-gpu_tune-batchsize--tune_lr.yaml"
 
     log = get_standard_python_logger(name=Path(config_path).stem,
                                      log_path=Path(config_path).parent / "experiment_logs") # 'notebook_experiment')

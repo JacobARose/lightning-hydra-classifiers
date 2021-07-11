@@ -11,11 +11,13 @@ from torch import nn
 import torchmetrics as metrics
 # from torchsummary import summary
 from pathlib import Path
+import numpy as np
 # from typing import Any, List, Optional, Dict, Tuple
 import pytorch_lightning as pl
 
 from lightning_hydra_classifiers.utils.metric_utils import get_per_class_metrics, get_scalar_metrics
-
+from lightning_hydra_classifiers.utils.logging_utils import get_wandb_logger
+import wandb
 __all__ = ["BaseModule", "BaseLightningModule"]
 
 
@@ -222,7 +224,7 @@ class BaseLightningModule(pl.LightningModule):
 #         y_prob, y_pred, y = logs['y_prob'], logs['y_pred'], logs['y_true']
         y_hat, y = logs['y_hat'], logs['y_true']
         
-        y_prob = self.probs(y_hat)
+        y_prob = self.probs(y_hat.float())
         y_pred = torch.max(y_prob, dim=1)[1]
         
         batch_metrics = self.metrics_train(y_prob, y)
@@ -254,8 +256,8 @@ class BaseLightningModule(pl.LightningModule):
         x, y = batch
         y_hat = self(x)
         loss = self.loss(y_hat, y)
-        y_prob = self.probs(y_hat)
-        y_pred = torch.max(y_prob, dim=1)[1]
+#         y_prob = self.probs(y_hat)
+#         y_pred = torch.max(y_prob, dim=1)[1]
         return {'loss':loss,
                 'log':{
                        'val_loss':loss,
@@ -272,13 +274,24 @@ class BaseLightningModule(pl.LightningModule):
         logs = outputs['log']
         loss = logs['val_loss']
 #         y_prob, y_pred, y = logs['y_prob'], logs['y_pred'], logs['y_true']
-        
+#         y_hat = logs['y_hat']        
         y_hat, y = logs['y_hat'], logs['y_true']
-        y_prob = self.probs(y_hat)
+#         print("y_hat.dtype=", y_hat.dtype)
+        y_prob = self.probs(y_hat.float())
         y_pred = torch.max(y_prob, dim=1)[1]
-        
-        batch_metrics = self.metrics_val(y_prob, y)
-        
+
+
+#         print("y_prob.dtype, y_prob_end.dtype)=", y_prob.dtype, y_prob_end.dtype)
+#         print("y_prob.half().dtype, y_prob_end.half().dtype=", y_prob.half().dtype, y_prob_end.half().dtype)
+#         print("y_prob.float().dtype, y_prob_end.float().dtype=", y_prob.float().dtype, y_prob_end.float().dtype)
+#         print(f'y_prob.is_floating_point() = {y_prob.is_floating_point()}')
+#         print("torch.isclose(y_prob.sum(dim=1), torch.ones_like(y_prob.sum(dim=1))).all()=")
+#         print(torch.isclose(y_prob.sum(dim=1), torch.ones_like(y_prob.sum(dim=1))).all())
+                
+        self.metrics_val(y_prob, y)
+        self.metrics_val_per_class(y_prob, y)
+#         batch_metrics = self.metrics_val(y_pred, y)
+#         breakpoint()
         for k in self.metrics_val.keys():
             prog_bar = bool('acc' in k)
             self.log(k,
@@ -290,14 +303,157 @@ class BaseLightningModule(pl.LightningModule):
 
         self.log('val/loss',loss,
                  on_step=True, on_epoch=True,
-                 logger=True, prog_bar=True,
-                 sync_dist=True)
+                 logger=True, prog_bar=True)#,
+#                  sync_dist=True)
 
+        outputs['y_prob'] = y_prob.cpu().numpy()
+        outputs['y_true'] = y.cpu().numpy()
+        
         return outputs
 
 
-    
 
+    def validation_epoch_end(self, validation_step_outputs):
+        y_prob, y = [], []
+        for batch in validation_step_outputs:
+            y_prob.extend(batch['y_prob'])
+            y.extend(batch['y_true'])
+            
+        
+        
+        print(type(y_prob[0]), y_prob[0].shape)
+        y_prob=np.stack(y_prob)
+        y=np.stack(y)
+        
+#         exit()
+#         print(y_prob.shape, y.shape)
+        logger = get_wandb_logger(self.trainer)
+        experiment = logger.experiment
+
+#         print(f'wandb experiment={experiment}')
+        if experiment:
+            experiment.log({"val/confusion_matrix" : wandb.plot.confusion_matrix(probs=y_prob, #np.concatenate(y_prob,axis=0),
+                                                                                 y_true=y, #np.stack(y),
+                                                                                 class_names=self.classes,
+                                                                                 title="val/confusion_matrix")})#,
+#                             "global_step": self.trainer.global_step},
+#                            commit=False)
+        
+#         f1 = self.metrics_val_per_class['val/F1'].compute()
+#         cm = self.metrics_val_per_class['val/ConfusionMatrix'].compute()
+        
+#         class_names = list(range(len(f1)))
+#         if hasattr(self, "classes"):
+#             class_names = self.classes
+#         assert isinstance(class_names, list)
+        
+        
+#         logger = get_wandb_logger(trainer)
+#         experiment = logger.experiment
+        
+        
+#         table = wandb.Table(columns=class_names)
+        
+#         for k,v in validation_step_outputs.items():
+#             v["log"][]
+        
+#         self.metrics_val_per_class.reset()
+        
+    
+    def test_step(self, batch, batch_idx):
+        x, y = batch
+        y_hat = self(x)
+        loss = self.loss(y_hat, y)
+#         y_prob = self.probs(y_hat)
+#         y_pred = torch.max(y_prob, dim=1)[1]
+        return {'loss':loss,
+                'log':{
+                       'test_loss':loss,
+                       'y_hat':y_hat,
+#                        'y_prob':y_prob,
+#                        'y_pred':y_pred,
+                       'y_true':y,
+                       'batch_idx':batch_idx
+                       }
+               }
+
+    def test_step_end(self, outputs):
+        
+        logs = outputs['log']
+        loss = logs['test_loss']
+#         y_prob, y_pred, y = logs['y_prob'], logs['y_pred'], logs['y_true']
+#         y_hat = logs['y_hat']        
+        y_hat, y = logs['y_hat'], logs['y_true']
+#         print("y_hat.dtype=", y_hat.dtype)
+        y_prob = self.probs(y_hat.float())
+        y_pred = torch.max(y_prob, dim=1)[1]
+        
+        
+        self.metrics_test(y_prob, y)
+        self.metrics_test_per_class(y_prob, y)
+#         batch_metrics = self.metrics_val(y_pred, y)
+#         breakpoint()
+        for k in self.metrics_test.keys():
+            prog_bar = bool('acc' in k)
+            self.log(k,
+                     self.metrics_test[k],
+                     on_step=False,
+                     on_epoch=True,
+                     logger=True,
+                     prog_bar=prog_bar)
+
+        self.log('test/loss',loss,
+                 on_step=True, on_epoch=True,
+                 logger=True, prog_bar=True)#,
+
+        
+        
+        
+#         outputs['y_prob'] = y_prob.cpu().numpy()
+#         outputs['y_true'] = y.cpu().numpy()
+        
+        return outputs
+
+###############################
+#         plt.figure(figsize=(14, 8))
+#         sns.set(font_scale=1.4)
+#         sns.heatmap(cm.numpy(), annot=True, annot_kws={"size": 8}, fmt="g")        
+        
+#         experiment.log({f"confusion_matrix/{experiment.name}": wandb.Image(plt)}, commit=False)
+
+        
+#         print(f"type(f1) = {type(f1)}")
+#         print(f"type(cm) = {type(cm)}")
+        
+#         if hasattr(f1, "shape"):
+#             print(f1.shape)
+
+#         if hasattr(cm, "shape"):
+#             print(cm.shape)
+#         if hasattr(f1, "__len__"):
+#             print(len(f1))
+
+#         if hasattr(cm, "__len__"):
+#             print(len(cm))
+#     wandb.log({"conf_mat" : wandb.plot.confusion_matrix(probs=None,
+#                             preds=top_pred_ids, y_true=ground_truth_class_ids,
+#                             class_names=self.flat_class_names)})
+            
+            
+#         self.metrics_val_per_class.reset()
+#         for k, v in validation_step_outputs[0].items():
+#         print(type(validation_step_outputs), len(validation_step_outputs), type(validation_step_outputs[0]))
+#         for k, v in validation_step_outputs[0].items():
+#             print(k, type(v))
+#             if hasattr(v, "shape"):
+#                 print(v.shape)
+#             elif isinstance(v, dict):
+#                 for kk, vv in v.items():
+#                     print(k, kk, type(vv))
+#                     if hasattr(vv, "shape"):
+#                         print(vv.shape)
+                    
+#         for pred in validation_step_outputs:
 
 
 

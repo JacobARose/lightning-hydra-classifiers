@@ -66,6 +66,7 @@ class Classifier(BaseModule):
                  finetune: bool=True):
 
         self.num_classes = num_classes
+        self.classes = []
         super(Classifier, self).__init__()
         
         if backbone is None:
