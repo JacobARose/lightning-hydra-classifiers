@@ -14,6 +14,7 @@ from pathlib import Path
 import numpy as np
 # from typing import Any, List, Optional, Dict, Tuple
 import pytorch_lightning as pl
+import os
 
 from lightning_hydra_classifiers.utils.metric_utils import get_per_class_metrics, get_scalar_metrics
 from lightning_hydra_classifiers.utils.logging_utils import get_wandb_logger
@@ -199,7 +200,7 @@ class BaseLightningModule(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         # 1. Forward pass:
-        x, y = batch
+        x, y = batch[:2]
         y_hat = self(x)
         loss = self.loss(y_hat, y)
         
@@ -244,7 +245,7 @@ class BaseLightningModule(pl.LightningModule):
                  on_epoch=True,
                  logger=True, 
                  prog_bar=True)
-        self.log('train/loss', loss,
+        self.log('train_loss', loss,
                  on_step=True,# on_epoch=True)#,
                  logger=True, 
                  prog_bar=True
@@ -253,17 +254,17 @@ class BaseLightningModule(pl.LightningModule):
         return outputs
         
     def validation_step(self, batch, batch_idx):
-        x, y = batch
+        x, y = batch[:2]
         y_hat = self(x)
         loss = self.loss(y_hat, y)
-#         y_prob = self.probs(y_hat)
-#         y_pred = torch.max(y_prob, dim=1)[1]
+        y_prob = self.probs(y_hat)
+        y_pred = torch.max(y_prob, dim=1)[1]
         return {'loss':loss,
                 'log':{
                        'val_loss':loss,
                        'y_hat':y_hat,
 #                        'y_prob':y_prob,
-#                        'y_pred':y_pred,
+                       'y_pred':y_pred,
                        'y_true':y,
                        'batch_idx':batch_idx
                        }
@@ -301,41 +302,46 @@ class BaseLightningModule(pl.LightningModule):
                      logger=True,
                      prog_bar=prog_bar)
 
-        self.log('val/loss',loss,
-                 on_step=True, on_epoch=True,
+        self.log('val_loss',loss,
+                 on_step=False, on_epoch=True,
                  logger=True, prog_bar=True)#,
 #                  sync_dist=True)
 
-        outputs['y_prob'] = y_prob.cpu().numpy()
-        outputs['y_true'] = y.cpu().numpy()
+        outputs['y_prob'] = y_prob #.cpu().numpy()
+        outputs['y_true'] = y #.cpu().numpy()
         
         return outputs
 
 
 
     def validation_epoch_end(self, validation_step_outputs):
+        
+        local_rank = os.environ.get("LOCAL_RANK", 0)
+        print(f'local_rank={local_rank}')
+        if str(local_rank)!="0":
+            print(f'Skipping val/confusion matrix logging on local_rank={local_rank}')
+            return None
+        
         y_prob, y = [], []
         for batch in validation_step_outputs:
-            y_prob.extend(batch['y_prob'])
-            y.extend(batch['y_true'])
+            y_prob.extend(batch['y_prob'].cpu().numpy())
+            y.extend(batch['y_true'].cpu().numpy())
             
         
-        
-        print(type(y_prob[0]), y_prob[0].shape)
         y_prob=np.stack(y_prob)
         y=np.stack(y)
         
-#         exit()
-#         print(y_prob.shape, y.shape)
         logger = get_wandb_logger(self.trainer)
         experiment = logger.experiment
 
-#         print(f'wandb experiment={experiment}')
         if experiment:
+            print(y_prob[0].shape)
             experiment.log({"val/confusion_matrix" : wandb.plot.confusion_matrix(probs=y_prob, #np.concatenate(y_prob,axis=0),
                                                                                  y_true=y, #np.stack(y),
                                                                                  class_names=self.classes,
                                                                                  title="val/confusion_matrix")})#,
+#             else:
+
 #                             "global_step": self.trainer.global_step},
 #                            commit=False)
         
@@ -361,7 +367,7 @@ class BaseLightningModule(pl.LightningModule):
         
     
     def test_step(self, batch, batch_idx):
-        x, y = batch
+        x, y = batch[:2]
         y_hat = self(x)
         loss = self.loss(y_hat, y)
 #         y_prob = self.probs(y_hat)
@@ -402,8 +408,8 @@ class BaseLightningModule(pl.LightningModule):
                      logger=True,
                      prog_bar=prog_bar)
 
-        self.log('test/loss',loss,
-                 on_step=True, on_epoch=True,
+        self.log('test_loss',loss,
+                 on_step=False, on_epoch=True,
                  logger=True, prog_bar=True)#,
 
         

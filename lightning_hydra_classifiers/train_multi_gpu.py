@@ -11,7 +11,7 @@ python "/media/data/jacob/GitHub/lightning-hydra-classifiers/notebooks/scaling m
 
 # ## Notebook 4. (Must be run as python script)
 # 
-# file: `4_acc=ddp-16bit-precision-2-gpu_tune-batchsize--tune_lr.ipynb`
+# file: `train_multi-gpu.py`
 # ### ddp - 16bit-precision -- 2-gpu -- tune-batchsize -- tune_lr -- include a batch_size tuning step, then a learning_rate tuning step (both using only 'dp'), before training (using 'ddp') then testing
 # 
 # Created by: Jacob A Rose  
@@ -32,8 +32,6 @@ python "/media/data/jacob/GitHub/lightning-hydra-classifiers/notebooks/scaling m
 
 
 from typing import Any, List, Optional
-# from pytorch_lightning.metrics.classification import Accuracy
-
 import shutil
 import os
 import torch
@@ -64,11 +62,6 @@ from pytorch_lightning.loggers import LightningLoggerBase
 from pytorch_lightning import seed_everything
 
 log = template_utils.get_logger(__name__)
-
-
-
-# load environment variables from `.env` file if it exists
-# recursively searches for `.env` in all folders starting from work dir
 dotenv.load_dotenv(override=True)
 
 @hydra.main(config_path="/media/data/jacob/GitHub/lightning-hydra-classifiers/configs/experiment/",
@@ -89,9 +82,9 @@ def main(config: DictConfig):
     template_utils.extras(config)
 #     OmegaConf.set_struct(config, False)
 
-    # Pretty print config using Rich library
-    if config.get("print_config"):
-        template_utils.print_config(config, resolve=True)
+#     # Pretty print config using Rich library
+#     if config.get("print_config"):
+#         template_utils.print_config(config, resolve=True)
 
         
     return train(config)
@@ -117,9 +110,16 @@ def train(config: DictConfig) -> Optional[float]:
 
     os.makedirs(config.log_dir, exist_ok=True)
 
-    template_utils.init(config)
+#     template_utils.init(config)
     
-    datamodule, config = configure_datamodule(config)    
+    datamodule, config = configure_datamodule(config)
+    
+    print(dir(datamodule))
+#     print(f'datamodule.num_classes={datamodule.num_classes}')
+#     print(f'datamodule.classes={datamodule.classes}')
+    print(f'config.datamodule.num_classes={config.datamodule.num_classes}')
+    print(f'config.hparams.num_classes={config.hparams.num_classes}')
+    
 #     template_utils.print_config(config, resolve=True)
 
     model = configure_model(config)
@@ -137,15 +137,22 @@ def train(config: DictConfig) -> Optional[float]:
         logger=trainer.logger,
     )
 
-    log.info("Starting training!")
+    
+    # Pretty print config using Rich library
+    if config.get("print_config"):
+        template_utils.print_config(config, resolve=True)
 
-    trainer.fit(model, datamodule=datamodule)    
+    
+    
+    if not config.test_only:
+        log.info("Starting training!")
+        trainer.fit(model, datamodule=datamodule)    
 #     test_results = trainer.test(datamodule=datamodule)
 
     # Evaluate model on test set after training
     if not config.trainer.get("fast_dev_run"):
         log.info("Starting testing!")
-        trainer.test()
+        trainer.test(model, datamodule=datamodule)
 
 
     # Make sure everything closed properly
@@ -161,15 +168,30 @@ def train(config: DictConfig) -> Optional[float]:
 
     try:
         log.info(f"Best checkpoint path:\n{trainer.checkpoint_callback.best_model_path}")
+        ckpt = trainer.checkpoint_callback.best_model_path
+        if os.path.isfile(ckpt):
+            model = model.load_from_checkpoint(ckpt)
+        else:
+            log.error(f"Proceeding without loading from checkpoint: {ckpt}")
+        
     except Exception as e:
         print(e)
         print(f'[Error] Verify checkpointing code')
         
+    try:
+        ckpt = trainer.checkpoint_callback.best_model_path
+    except:
+        ckpt = None
 
         
         
     optimized_metric = config.get("optimized_metric")
     if optimized_metric:
+        log.info(f'optimized_metric={optimized_metric}')
+        log.info(f'value: {trainer.callback_metrics[optimized_metric]}')
+        if ckpt:
+            log.info(f'Best checkpoint: {ckpt}')
+            log.info(f'isfile: {os.path.isfile(ckpt)}')
         return trainer.callback_metrics[optimized_metric]
 
 
@@ -244,6 +266,8 @@ def configure_datamodule(config: DictConfig) -> pl.LightningDataModule:
         datamodule.setup(stage="fit")
         config.hparams.classes = datamodule.classes
         config.hparams.num_classes = len(config.hparams.classes)
+        
+        print(f'config.hparams.num_classes={config.hparams.num_classes}')
     except Exception as e:
         print(e)
         pass

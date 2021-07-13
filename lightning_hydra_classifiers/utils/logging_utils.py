@@ -18,7 +18,7 @@ import os
 import pandas as pd
 from pathlib import Path
 import wandb
-from typing import List, Any, Dict
+from typing import List, Any, Dict, Sequence, Optional
 import pytorch_lightning as pl
 
 import glob

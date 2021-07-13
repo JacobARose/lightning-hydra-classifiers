@@ -1,0 +1,25 @@
+_target_: lightning_hydra_classifiers.models.transfer.TransferLearningModel
+
+# classifier:
+#     _target_: lightning_hydra_classifiers.models.transfer.Classifier
+#     backbone_name: '${hparams.backbone}'
+#     num_classes: '${hparams.num_classes}'
+#     finetune: true
+
+classifier_kwargs:
+#     _target_: lightning_hydra_classifiers.models.transfer.Classifier
+    backbone_name: '${hparams.backbone}'
+    num_classes: '${hparams.num_classes}'
+    pretrained: true
+    finetune: true
+
+
+
+train_bn: '${callbacks.finetuning.train_bn}'
+milestones: '${callbacks.finetuning.milestones}'
+batch_size: '${hparams.batch_size}'
+optimizer: "Adam"
+lr: '${hparams.lr}'
+lr_scheduler_gamma: 0.1
+
+model_dir: null

@@ -1,0 +1,14 @@
+[tool.poetry]
+name = "lightning-hydra-classifiers"
+version = "0.1.0"
+description = ""
+authors = ["Jacob A Rose <jacobrose@brown.edu>"]
+
+[tool.poetry.dependencies]
+python = "^3.7"
+
+[tool.poetry.dev-dependencies]
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"

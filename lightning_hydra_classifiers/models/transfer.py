@@ -42,7 +42,7 @@ Note:
 import logging
 import os
 from pathlib import Path
-from typing import Union, Callable, Tuple
+from typing import Union, Callable, Tuple, Optional, Dict, Any
 
 import torch
 import torch.nn.functional as F
@@ -78,7 +78,9 @@ log = logging.getLogger(__name__)
 
 class MilestonesFinetuning(BaseFinetuning):
     
-    def __init__(self, milestones: tuple = (5, 10), train_bn: bool = False):
+    def __init__(self,
+                 milestones: tuple = (3, 5, 10),
+                 train_bn: bool = False):
         super().__init__()
         self.milestones = milestones
         self.train_bn = train_bn
@@ -116,20 +118,26 @@ class MilestonesFinetuning(BaseFinetuning):
         """
         
         if epoch == self.milestones[0]:
-            unfreeze_layers = ['layer3']
+            unfreeze_layers = ['layer4']
             modules = [p for name, p in pl_module.feature_extractor.named_parameters() if name in unfreeze_layers]
             self.unfreeze_and_add_param_group(
                 modules=nn.Sequential(*modules), optimizer=optimizer, train_bn=self.train_bn
             )
 
         elif epoch == self.milestones[1]:
-            unfreeze_layers = ['layer2']
+            unfreeze_layers = ['layer3']
             modules = [p for name, p in pl_module.feature_extractor.named_parameters() if name in unfreeze_layers]
             self.unfreeze_and_add_param_group(
                 modules=nn.Sequential(*modules), optimizer=optimizer, train_bn=self.train_bn
             )
 
             
+        if epoch == self.milestones[2]:
+            unfreeze_layers = ['layer2']
+            modules = [p for name, p in pl_module.feature_extractor.named_parameters() if name in unfreeze_layers]
+            self.unfreeze_and_add_param_group(
+                modules=nn.Sequential(*modules), optimizer=optimizer, train_bn=self.train_bn
+            )
             
             
             
@@ -142,13 +150,14 @@ class TransferLearningModel(BaseLightningModule):
 
     def __init__(
                  self,
-                 classifier: heads.Classifier,
+                 classifier: heads.Classifier=None,
                  train_bn: bool = False,
-                 milestones: tuple = (2, 4),
+                 milestones: tuple = (2, 4, 8),
                  batch_size: int = 32,
                  optimizer: str = "Adam",
                  lr: float = 1e-3,
                  lr_scheduler_gamma: float = 1e-1,
+                 classifier_kwargs: Optional[Dict[str, Any]]=None,
 #                  num_workers: int = 6,
                  **kwargs
                  ) -> None:
@@ -167,7 +176,11 @@ class TransferLearningModel(BaseLightningModule):
         """
         super().__init__()
         self.classifier = classifier
-        self.num_classes = classifier.num_classes
+        self.classifier_kwargs = classifier_kwargs or {}
+        if classifier is None:
+            self.num_classes = self.classifier_kwargs['num_classes']
+        else:
+            self.num_classes = classifier.num_classes
         
         self.train_bn = train_bn
         self.milestones = milestones
@@ -186,7 +199,7 @@ class TransferLearningModel(BaseLightningModule):
     def _build_classifier(self):
         """Define model layers & loss."""
         if self.classifier is None:
-            self.classifier = self.classifier_factory()
+            self.classifier = self.classifier_factory(**self.classifier_kwargs)
         self.feature_extractor = self.classifier.backbone
     
         self.fc = self.classifier.head        

@@ -88,6 +88,7 @@ def print_config(
         "datamodule",
         "callbacks",
         "logger",
+        "hparams",
         "seed",
     ),
     resolve: bool = True,
@@ -148,6 +149,8 @@ def log_hyperparameters(
         hparams["optimizer"] = config["optimizer"]
     if "callbacks" in config:
         hparams["callbacks"] = config["callbacks"]
+    if "hparams" in config:
+        hparams["hparams"] = config["hparams"]
 
     # save sizes of each dataset
     # (requires calling `datamodule.setup()` first to initialize datasets)
@@ -167,10 +170,12 @@ def log_hyperparameters(
     hparams["model/params_not_trainable"] = sum(
         p.numel() for p in model.parameters() if not p.requires_grad
     )
-
-    # send hparams to all loggers
-    trainer.logger.log_hyperparams(hparams)
     
+    for logger in trainer.logger:
+        if hasattr(logger, "log_hyperparams"):
+            trainer.logger.log_hyperparams(hparams)
+        if hasattr(logger, 'save_dir'):
+            os.makedirs(logger.save_dir, exist_ok=True)
     
     if 'wandb' in config.logger.keys():
         wandb.watch(model.classifier, criterion=model.criterion, log='all')
@@ -181,14 +186,38 @@ def log_hyperparameters(
     trainer.logger.log_hyperparams = empty
 
 
+from torch import distributed as dist
+    
 # @rank_zero_only
 def init(config: DictConfig):
+#     wandb.init(..., reinit=dist.is_available() and dist.is_initialized() and dist.get_rank() == 0)
+    if config.trainer.accelerator == "ddp":
+#     if wandb.run is None:
+        config.wandb.init.reinit = True# = dist.is_available() and dist.is_initialized() and (dist.get_rank() == 0)
+#         print(f"dist.is_available()={dist.is_available()}")
+#         print(f"dist.is_initialized()={dist.is_initialized()}")
+#         print(f"dist.get_rank() == 0)={(dist.get_rank() == 0)}")
     
-    if wandb.run is None:
+        logging.info(f"Since trainer.accelerator={config.trainer.accelerator}, setting config.wandb.init.reinit to: {config.wandb.init.reinit}")
+        
+#             logging.info(f"torch.distributed.get_rank() = {dist.get_rank()}")
+        
         local_rank = os.environ.get("LOCAL_RANK", 0)
         print(f'local_rank={local_rank}')
-        hydra.utils.instantiate(config.wandb.init)
-        print(f'Just may have successfully initiated wandb')
+        if str(local_rank)=="0":
+            hydra.utils.instantiate(config.wandb.init)
+            print(f'Just may have successfully initiated wandb')
+        else:
+            print(f'Skipping wandb.init b/c local_rank={local_rank}')
+        
+    
+# def init_ddp_connection(self, *args, **kwargs):
+#     super().init_ddp_connection(*args, **kwargs)
+
+#     if torch.distributed.get_rank() == 0:
+#         import wandb
+#         wandb.run = None
+    
     
 def finish(
     config: DictConfig,

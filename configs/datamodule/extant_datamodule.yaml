@@ -1,17 +1,19 @@
 _target_: contrastive_learning.data.pytorch.extant.ExtantLightningDataModule
 
 basename: "Extant"
-name: '${.basename}_family_10_512'
-batch_size: 256
-val_split: 0.0
-num_classes: null
-image_size: 512
+name: '${.basename}_${.class_type}_10_${.image_size}'
+batch_size: '${hparams.batch_size}'
+val_split: 0.2
+test_split: 0.0
+num_classes: '${hparams.num_classes}'
+classes: '${hparams.classes}'
+image_size: '${hparams.image_size}'
 channels: 3
 class_type: "family"
 normalize: true
-seed: 98568764
 predict_on_split: "val"
-debug: false
-num_workers: 4
+seed: '${seed}'
+debug: '${debug}'
+num_workers: 0
 root_dir: ${root_dir}
 dataset_dir: ${.root_dir}/datasets/${.name}

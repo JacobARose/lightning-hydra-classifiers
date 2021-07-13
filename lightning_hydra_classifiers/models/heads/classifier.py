@@ -60,18 +60,23 @@ class Classifier(BaseModule):
                  backbone: nn.Module = None,
                  num_classes: int = 1000,
                  backbone_name: Optional[str] = 'resnet50',
+                 pretrained: bool=True,
                  bottleneck_dim: Optional[int] = -1,
                  bottleneck: Optional[nn.Module] = None,
                  head: Optional[nn.Module] = None,
-                 finetune: bool=True):
+                 finetune: bool=True,
+                 **kwargs
+                 ):
 
+        print(f'Classifier: {dir()}')
+        
         self.num_classes = num_classes
         self.classes = []
         super(Classifier, self).__init__()
         
         if backbone is None:
             backbone = self.build_backbone(name=backbone_name,
-                                                pretrained=True)
+                                           pretrained=pretrained)
             
         self.backbone = backbone
         self.backbone_name = self.backbone.name

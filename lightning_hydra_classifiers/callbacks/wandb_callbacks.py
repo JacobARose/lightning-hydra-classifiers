@@ -7,6 +7,7 @@ import seaborn as sns
 import numpy as np
 import torch
 import wandb
+import pandas as pd
 # from torchmetrics import metrics
 from torch.utils.data import DataLoader #,Dataset, Subset, random_split
 from pytorch_lightning import Callback, Trainer, LightningDataModule
@@ -17,8 +18,10 @@ from sklearn.metrics import f1_score, precision_score, recall_score
 
 from pathlib import Path
 
-
-
+    
+from sklearn.metrics import confusion_matrix
+import plotly.graph_objs as go
+from plotly.subplots import make_subplots
 
 
 
@@ -81,10 +84,11 @@ class ImagePredictionLogger(Callback):
 #         self.datamodule.setup(stage=stage)
 #         x, y, paths = next(iter(self.datamodule.get_dataloader(self.subset)))
         x, y, paths = [], [], []
-        for idx, (x_batch, y_batch, paths_batch) in enumerate(self.data_iterator):
+        for idx, batch in enumerate(self.data_iterator):
+            x_batch, y_batch = batch[:2]
             x.append(x_batch)
             y.append(y_batch)
-            paths.extend(paths_batch)
+#             paths.extend(paths_batch)
             if idx*x_batch.shape[0] >= self.max_samples_per_epoch:
                 break
         if len(x)==0:
@@ -307,6 +311,7 @@ class LogPerClassMetricsToWandb(Callback):
         elif 'hidden' in outputs.keys():
             outputs = outputs['hidden']
         if self.ready:
+            
             self.preds.append(outputs["y_pred"].cpu())
             self.targets.append(outputs["y_true"].cpu())
 
@@ -329,6 +334,11 @@ class LogPerClassMetricsToWandb(Callback):
         """
         Generate f1, precision and recall heatmap
         """
+        sns_context = "talk"
+        sns_style = "seaborn-bright"
+        cmap="YlGnBu"
+        sns.set_context(context=sns_context, font_scale=0.8)
+        plt.style.use(sns_style)
 
         f1 = f1_score(preds, targets, average=None)
         r = recall_score(preds, targets, average=None)
@@ -338,24 +348,34 @@ class LogPerClassMetricsToWandb(Callback):
         if len(support) < len(p):
             s = np.zeros_like(p)
             for i, support_class_i in zip(class_indices, support):
+#                 if i == len(p):
+                if i >= len(support)-1:
+                    break
                 s[i] = support_class_i
             support = s
             
         data = [f1, p, r, support]
 
         plt.figure(figsize=(20, 6))
-        sns.set(font_scale=1.2)
+#         sns.set(font_scale=1.2)
         
-        annot = len(support) < 75
+        annot = bool(len(support) < 75)
+        print(f'class_indices={class_indices}')
+        g = sns.heatmap(
+                        data,
+                        annot=annot,
+                        vmin=0.0, vmax=1.0,
+                        linewidths=1,
+                        annot_kws={"size": 8},
+                        fmt=".2f",
+                        cmap=cmap,
+                        yticklabels=["F1", "Precision", "Recall", "Support"],
+                        xticklabels=self.class_names # [self.class_names[int(i)] for i in class_indices]
+                    )
+        g.set_xticklabels(g.get_xticklabels(), rotation=45, horizontalalignment='right', fontsize='medium', fontweight='light')
+        g.set_yticklabels(g.get_yticklabels(), rotation=45, horizontalalignment='right', fontsize='medium', fontweight='light')
+        plt.subplots_adjust(bottom=0.2, top=0.95, wspace=None, hspace=0.07)
 
-        sns.heatmap(
-            data,
-            annot=annot,
-            vmin=0.0, vmax=1.0,
-            annot_kws={"size": 10},
-            fmt=".3f",
-            yticklabels=["F1", "Precision", "Recall", "Support"],
-        )
 
         # names should be uniqe or else charts from different experiments in wandb will overlap
         logger.experiment.log({f"val/per_class_f1_p_r_heatmap/{logger.experiment.name}": wandb.Image(plt)}, commit=False)
@@ -367,13 +387,37 @@ class LogPerClassMetricsToWandb(Callback):
         """
         Generate confusion_matrix heatmap
         """
-        confusion_matrix = metrics.confusion_matrix(y_true=targets, y_pred=preds)
-        plt.figure(figsize=(14, 8))
-        sns.set(font_scale=1.4)
         
-        annot = confusion_matrix.shape[0] < 75
+        sns_context = "talk"
+        sns_style = "seaborn-bright"
+        cmap="YlGnBu_r"
+        sns.set_context(context=sns_context, font_scale=0.8)
+        plt.style.use(sns_style)
+        
+        confusion_matrix = pd.DataFrame(metrics.confusion_matrix(y_true=targets, y_pred=preds))
+        confusion_matrix.index.name = "True"
+        confusion_matrix = confusion_matrix.T
+        confusion_matrix.index.name = "Predicted"
+        confusion_matrix = confusion_matrix.T
+        plt.figure(figsize=(14, 8))
+#         sns.set(font_scale=1.4)
+        
+        annot = bool(confusion_matrix.shape[0] < 75)
 
-        sns.heatmap(confusion_matrix, annot=annot, annot_kws={"size": 8}, fmt="g")
+        g = sns.heatmap(confusion_matrix, 
+                        annot=annot,
+                        linewidths=1,
+                        annot_kws={"size": 8},
+                        fmt="g",
+                        cmap=cmap,
+                        yticklabels=self.class_names,
+                        xticklabels=self.class_names # [self.class_names[int(i)] for i in class_indices]
+                        )
+        
+        g.set_xticklabels(g.get_xticklabels(), rotation=45, horizontalalignment='right', fontsize='small', fontweight='light')
+        g.set_yticklabels(g.get_yticklabels(), rotation=45, horizontalalignment='right', fontsize='small', fontweight='light')
+        plt.subplots_adjust(bottom=0.2, top=0.95, wspace=None, hspace=0.07)
+
         # names should be uniqe or else charts from different experiments in wandb will overlap
         logger.experiment.log({f"val/confusion_matrix/{logger.experiment.name}": wandb.Image(plt)}, commit=False)
         plt.clf()
@@ -384,15 +428,6 @@ class LogPerClassMetricsToWandb(Callback):
         
 ###################################################
 
-
-
-import numpy as np
-import wandb
-# from wandb.keras import WandbCallback
-    
-from sklearn.metrics import confusion_matrix
-import plotly.graph_objs as go
-from plotly.subplots import make_subplots
 
 # source: https://colab.research.google.com/drive/1k89TDv8ybckgfVByUIhY6peBjtNGBH-k?usp=sharing#scrollTo=RO1MSGLeAzWp
 class WandbClassificationCallback(Callback):
