@@ -569,7 +569,6 @@ class BaseLightningModule(pl.LightningModule):
     
     
     
-# Inherits from dict
 class Registry(dict):
     '''
     A helper class for managing registering modules, it extends a dictionary

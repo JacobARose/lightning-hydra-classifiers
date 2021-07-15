@@ -46,7 +46,6 @@ import rich
 
 import sys
 import logging
-from lightning_hydra_classifiers.utils import template_utils
 import hydra
 from hydra.experimental import compose, initialize_config_dir
 from omegaconf import OmegaConf, DictConfig
@@ -57,6 +56,7 @@ import dotenv
 import hydra
 from omegaconf import DictConfig, OmegaConf
 
+from lightning_hydra_classifiers.utils import template_utils
 from pytorch_lightning import LightningModule, LightningDataModule, Callback, Trainer
 from pytorch_lightning.loggers import LightningLoggerBase
 from pytorch_lightning import seed_everything
@@ -114,9 +114,6 @@ def train(config: DictConfig) -> Optional[float]:
     
     datamodule, config = configure_datamodule(config)
     
-    print(dir(datamodule))
-#     print(f'datamodule.num_classes={datamodule.num_classes}')
-#     print(f'datamodule.classes={datamodule.classes}')
     print(f'config.datamodule.num_classes={config.datamodule.num_classes}')
     print(f'config.hparams.num_classes={config.hparams.num_classes}')
     

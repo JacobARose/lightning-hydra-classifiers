@@ -300,10 +300,48 @@ class TransferLearningModel(BaseLightningModule):
 #                  logger=True, prog_bar=True)
 
 
-    
-    
-    
-    
+
+
+
+
+
+# class FeedForwardBackbone(pl.LightningModule):
+#     def __init__(self, config: DictConfig, **kwargs):
+#         self.embedding_cat_dim = sum([y for x, y in config.embedding_dims])
+#         super().__init__()
+#         self.save_hyperparameters(config)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 # class MyLightningCLI(LightningCLI):
 
 #     def add_arguments_to_parser(self, parser):
