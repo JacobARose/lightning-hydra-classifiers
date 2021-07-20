@@ -16,6 +16,12 @@ def get_logger(name=__name__, level=logging.INFO):
     """Initializes python logger."""
 
     logger = logging.getLogger(name)
+    
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter('%(asctime)s %(name)-12s %(levelname)-8s %(message)s')
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    
     logger.setLevel(level)
 
     # this ensures all logging levels get marked with the rank zero decorator

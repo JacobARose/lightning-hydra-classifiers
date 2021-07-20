@@ -16,11 +16,12 @@ import numbers
 from lightning_hydra_classifiers.utils import template_utils
 from typing import Union, List, Any, Tuple, Dict
 import collections
+from sklearn.model_selection import train_test_split
 
 log = template_utils.get_logger(__name__)
 
 
-__all__ = ["LabelEncoder", "trainvaltest_split"]
+__all__ = ["LabelEncoder", "trainval_split", "trainvaltest_split"]
 
 
 
@@ -48,13 +49,14 @@ class LabelEncoder(object):
 
         old_num_classes = len(self)
         new_classes = [label for label in classes if label not in self.classes]
-        log.info(f"fitting {len(y)} labels, adding {len(new_classes)} new classes")
                 
         for i, label in enumerate(new_classes):
             self.class2idx[label] = old_num_classes + i
         self.index2class = {v: k for k, v in self.class2idx.items()}
         self.classes = list(self.class2idx.keys())
         
+        if len(new_classes):
+            log.debug(f"[FITTING] {len(y)} samples with {len(classes)} classes, adding {len(new_classes)} new class labels. Latest num_classes = {len(self)}")
         assert len(self) == (old_num_classes + len(new_classes))
         return self
 
@@ -103,6 +105,72 @@ class LabelEncoder(object):
 #             classes.append([self.index2class[index] for index in indices])
 #         return classes
 
+####################################################
+
+
+def trainval_split(x: Union[List[Any],np.ndarray]=None,
+                   y: Union[List[Any],np.ndarray]=None,
+                   val_train_split: float=0.2,
+                   random_state: int=None,
+                   stratify: bool=True
+                   ) -> Dict[str,Tuple[np.ndarray]]:
+    """
+    Wrapper function to split data into 3 stratified subsets specified by `splits`.
+    
+    User specifies absolute fraction of total requested for each subset (e.g. splits=[0.5, 0.2, 0.3])
+    
+    Function calculates adjusted fractions necessary in order to use sklearn's builtin train_test_split function over a sequence of 2 steps.
+    
+    Step 1: Separate test set from the rest of the data (constituting the union of train + val)
+    
+    Step 2: Separate the train and val sets from the remainder produced by step 1.
+
+    Output:
+        Dict: {'train':(x_train, y_train),
+                'val':(x_val_y_val),
+                'test':(x_test, y_test)}
+                
+    Example:
+        >> data = torch.data.Dataset(...)
+        >> y = data.targets
+        >> data_splits = trainvaltest_split(x=None,
+                                            y=y,
+                                            splits=(0.5, 0.2, 0.3),
+                                            random_state=0,
+                                            stratify=True)
+    
+    """
+    
+
+    
+    
+    
+    train_split = 1.0 - val_train_split
+    
+    if stratify and (y is None):
+        raise ValueError("If y is not provided, stratify must be set to False.")
+    
+    y = np.array(y)
+    if x is None:
+        x = np.arange(len(y))
+    else:
+        x = np.array(x)
+    
+    stratify_y = y if stratify else None    
+    x_train, x_val, y_train, y_val = train_test_split(x, y,
+                                                      test_size=val_train_split, 
+                                                      random_state=random_state,
+                                                      stratify=stratify_y)
+
+    x = np.concatenate((x_train, x_val)).tolist()
+    assert len(set(x)) == len(x), f"[Warning] Check for possible data leakage. len(set(x))={len(set(x))} != len(x)={len(x)}"
+    
+    log.debug(f"x_train.shape={x_train.shape}, y_train.shape={y_train.shape}")
+    log.debug(f"x_val.shape={x_val.shape}, y_val.shape={y_val.shape}")
+    log.debug(f'Absolute splits: {[train_split, val_train_split]}')
+    
+    return {"train":(x_train, y_train),
+            "val":(x_val, y_val)}
 
 
 
@@ -111,9 +179,7 @@ class LabelEncoder(object):
 
 
 
-
-
-
+####################################################
 
 def trainvaltest_split(x: Union[List[Any],np.ndarray]=None,
                        y: Union[List[Any],np.ndarray]=None,
@@ -171,12 +237,7 @@ def trainvaltest_split(x: Union[List[Any],np.ndarray]=None,
                                                         test_size=test_split, 
                                                         random_state=random_state,
                                                         stratify=y)
-    log.info(f"(x_train+x_val).shape={x_train_val.shape}, (y_train+y_val).shape={y_train_val.shape}")
-    log.info(f"x_test.shape={x_test.shape}, y_test.shape={y_test.shape}")
     
-#     print(f"(x_train+x_val).shape={x_train_val.shape}, (y_train+y_val).shape={y_train_val.shape}")
-#     print(f"x_test.shape={x_test.shape}, y_test.shape={y_test.shape}")
-
     stratify_y_train = y_train_val if stratify else None
     x_train, x_val, y_train, y_val = train_test_split(x_train_val, y_train_val,
                                                       test_size=val_relative_split,
@@ -186,11 +247,11 @@ def trainvaltest_split(x: Union[List[Any],np.ndarray]=None,
     x = np.concatenate((x_train, x_val, x_test)).tolist()
     assert len(set(x)) == len(x), f"[Warning] Check for possible data leakage. len(set(x))={len(set(x))} != len(x)={len(x)}"
     
-    log.info(f"x_train.shape={x_train.shape}, y_train.shape={y_train.shape}")
-    log.info(f"x_val.shape={x_val.shape}, y_val.shape={y_val.shape}")
-    
-    log.info(f'Absolute splits: {[train_split, val_split, test_split]}')
-    log.info(f'Relative splits: [{train_relative_split:.2f}, {val_relative_split:.2f}, {test_split}]')
+    log.debug(f"x_train.shape={x_train.shape}, y_train.shape={y_train.shape}")
+    log.debug(f"x_val.shape={x_val.shape}, y_val.shape={y_val.shape}")
+    log.debug(f"x_test.shape={x_test.shape}, y_test.shape={y_test.shape}")
+    log.debug(f'Absolute splits: {[train_split, val_split, test_split]}')
+    log.debug(f'Relative splits: [{train_relative_split:.2f}, {val_relative_split:.2f}, {test_split}]')
     
     return {"train":(x_train, y_train),
             "val":(x_val, y_val),

@@ -10,7 +10,7 @@ classifier_kwargs:
 #     _target_: lightning_hydra_classifiers.models.transfer.Classifier
     backbone_name: '${hparams.backbone}'
     num_classes: '${hparams.num_classes}'
-    pretrained: true
+    pretrained: '${hparams.pretrained}'
     finetune: true
 
 

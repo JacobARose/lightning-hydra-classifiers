@@ -209,7 +209,7 @@ class BaseLightningModule(pl.LightningModule):
         
         return {'loss':loss,
                 'log':{
-                       'train_loss':loss,
+                       'train/loss':loss,
                         'y_hat':y_hat,
 #                        'y_prob':y_prob,
 #                        'y_pred':y_pred,
@@ -245,7 +245,7 @@ class BaseLightningModule(pl.LightningModule):
                  on_epoch=True,
                  logger=True, 
                  prog_bar=True)
-        self.log('train_loss', loss,
+        self.log('train/loss', loss,
                  on_step=True,# on_epoch=True)#,
                  logger=True, 
                  prog_bar=True
@@ -261,7 +261,7 @@ class BaseLightningModule(pl.LightningModule):
         y_pred = torch.max(y_prob, dim=1)[1]
         return {'loss':loss,
                 'log':{
-                       'val_loss':loss,
+                       'val/loss':loss,
                        'y_hat':y_hat,
 #                        'y_prob':y_prob,
                        'y_pred':y_pred,
@@ -273,7 +273,7 @@ class BaseLightningModule(pl.LightningModule):
     def validation_step_end(self, outputs):
         
         logs = outputs['log']
-        loss = logs['val_loss']
+        loss = logs['val/loss']
 #         y_prob, y_pred, y = logs['y_prob'], logs['y_pred'], logs['y_true']
 #         y_hat = logs['y_hat']        
         y_hat, y = logs['y_hat'], logs['y_true']
@@ -290,7 +290,7 @@ class BaseLightningModule(pl.LightningModule):
 #         print(torch.isclose(y_prob.sum(dim=1), torch.ones_like(y_prob.sum(dim=1))).all())
                 
         self.metrics_val(y_prob, y)
-        self.metrics_val_per_class(y_prob, y)
+#         self.metrics_val_per_class(y_prob, y)
 #         batch_metrics = self.metrics_val(y_pred, y)
 #         breakpoint()
         for k in self.metrics_val.keys():
@@ -302,7 +302,7 @@ class BaseLightningModule(pl.LightningModule):
                      logger=True,
                      prog_bar=prog_bar)
 
-        self.log('val_loss',loss,
+        self.log('val/loss',loss,
                  on_step=False, on_epoch=True,
                  logger=True, prog_bar=True)#,
 #                  sync_dist=True)
@@ -314,32 +314,38 @@ class BaseLightningModule(pl.LightningModule):
 
 
 
-    def validation_epoch_end(self, validation_step_outputs):
+#     def validation_epoch_end(self, validation_step_outputs):
         
-        local_rank = os.environ.get("LOCAL_RANK", 0)
-        print(f'local_rank={local_rank}')
-        if str(local_rank)!="0":
-            print(f'Skipping val/confusion matrix logging on local_rank={local_rank}')
-            return None
+#         local_rank = os.environ.get("LOCAL_RANK", 0)
+#         print(f'local_rank={local_rank}')
+#         if str(local_rank)!="0":
+#             print(f'Skipping val/confusion matrix logging on local_rank={local_rank}')
+#             return None
         
-        y_prob, y = [], []
-        for batch in validation_step_outputs:
-            y_prob.extend(batch['y_prob'].cpu().numpy())
-            y.extend(batch['y_true'].cpu().numpy())
+#         y_prob, y = [], []
+#         for batch in validation_step_outputs:
+#             y_prob.extend(batch['y_prob'].cpu().numpy())
+#             y.extend(batch['y_true'].cpu().numpy())
             
         
-        y_prob=np.stack(y_prob)
-        y=np.stack(y)
+#         y_prob=np.stack(y_prob)
+#         y=np.stack(y)
         
-        logger = get_wandb_logger(self.trainer)
-        experiment = logger.experiment
+#         logger = get_wandb_logger(self.trainer)
+#         experiment = logger.experiment
 
-        if experiment:
-            print(y_prob[0].shape)
-            experiment.log({"val/confusion_matrix" : wandb.plot.confusion_matrix(probs=y_prob, #np.concatenate(y_prob,axis=0),
-                                                                                 y_true=y, #np.stack(y),
-                                                                                 class_names=self.classes,
-                                                                                 title="val/confusion_matrix")})#,
+#         if experiment:
+#             print(y_prob[0].shape)
+#             experiment.log({"val/confusion_matrix" : wandb.plot.confusion_matrix(probs=y_prob, #np.concatenate(y_prob,axis=0),
+#                                                                                  y_true=y, #np.stack(y),
+#                                                                                  class_names=self.classes,
+#                                                                                  title="val/confusion_matrix")})#,
+
+
+
+
+
+
 #             else:
 
 #                             "global_step": self.trainer.global_step},
@@ -374,7 +380,7 @@ class BaseLightningModule(pl.LightningModule):
 #         y_pred = torch.max(y_prob, dim=1)[1]
         return {'loss':loss,
                 'log':{
-                       'test_loss':loss,
+                       'test/loss':loss,
                        'y_hat':y_hat,
 #                        'y_prob':y_prob,
 #                        'y_pred':y_pred,
@@ -386,7 +392,7 @@ class BaseLightningModule(pl.LightningModule):
     def test_step_end(self, outputs):
         
         logs = outputs['log']
-        loss = logs['test_loss']
+        loss = logs['test/loss']
 #         y_prob, y_pred, y = logs['y_prob'], logs['y_pred'], logs['y_true']
 #         y_hat = logs['y_hat']        
         y_hat, y = logs['y_hat'], logs['y_true']
@@ -408,7 +414,7 @@ class BaseLightningModule(pl.LightningModule):
                      logger=True,
                      prog_bar=prog_bar)
 
-        self.log('test_loss',loss,
+        self.log('test/loss',loss,
                  on_step=False, on_epoch=True,
                  logger=True, prog_bar=True)#,
 

@@ -113,8 +113,9 @@ def train(config: DictConfig) -> Optional[float]:
 #     template_utils.init(config)
     
     datamodule, config = configure_datamodule(config)
-    
-    print(f'config.datamodule.num_classes={config.datamodule.num_classes}')
+    config.hparams.update({"num_classes":datamodule.num_classes,
+                          "classes":datamodule.classes})
+    print(f'config.datamodule.num_classes={config.datamodule.config.num_classes}')
     print(f'config.hparams.num_classes={config.hparams.num_classes}')
     
 #     template_utils.print_config(config, resolve=True)
@@ -168,6 +169,7 @@ def train(config: DictConfig) -> Optional[float]:
         ckpt = trainer.checkpoint_callback.best_model_path
         if os.path.isfile(ckpt):
             model = model.load_from_checkpoint(ckpt)
+            trainer.save_checkpoint(f"{config.log_dir}/best_model.ckpt")
         else:
             log.error(f"Proceeding without loading from checkpoint: {ckpt}")
         

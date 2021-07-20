@@ -320,6 +320,19 @@ class LogPerClassMetricsToWandb(Callback):
         then generate confusion matrix."""
         if self.ready and len(self.preds) and len(self.targets):
             wandb_logger = get_wandb_logger(trainer=trainer)
+            rank = pl_module.global_rank
+            print(f'Rank: {rank}')
+            print(f"wandb_logger.experiment={wandb_logger.experiment}")
+            print(f"dir(wandb_logger.experiment)={dir(wandb_logger.experiment)}")
+            print(f"wandb_logger.experiment.disabled={wandb_logger.experiment.disabled}")
+            print(f"wandb_logger.experiment.id={wandb_logger.experiment.id}")
+            print(f"wandb_logger.experiment.name={wandb_logger.experiment.name}")
+#             if
+            if (rank > 0) or (wandb_logger is None) or (wandb_logger.experiment.id is None):
+                print(f"(wandb_logger.experiment.id is None) = {(wandb_logger.experiment.id is None)}")
+                print(f"Rank>0, skipping per class metrics\n", "="*20)
+                return
+            print(dir(wandb_logger))
 
             preds = torch.cat(self.preds).numpy() #.cpu().numpy()
             targets = torch.cat(self.targets).numpy() #.cpu().numpy()
@@ -327,6 +340,8 @@ class LogPerClassMetricsToWandb(Callback):
             self._log_per_class_scores(preds, targets, logger=wandb_logger)
             self._log_confusion_matrix(preds, targets, logger=wandb_logger)
             wandb_logger.experiment.log({f"epoch": trainer.current_epoch})
+            
+            print("num_validation_samples: ", len(preds))
             self.preds.clear()
             self.targets.clear()
             
@@ -334,16 +349,16 @@ class LogPerClassMetricsToWandb(Callback):
         """
         Generate f1, precision and recall heatmap
         """
-        sns_context = "talk"
+        sns_context = "poster"
         sns_style = "seaborn-bright"
-        cmap="YlGnBu"
-        sns.set_context(context=sns_context, font_scale=0.8)
+        cmap="YlGnBu_r"
+        sns.set_context(context=sns_context, font_scale=0.7)
         plt.style.use(sns_style)
 
         f1 = f1_score(preds, targets, average=None)
         r = recall_score(preds, targets, average=None)
         p = precision_score(preds, targets, average=None)
-#         import pdb; pdb.set_trace()
+
         class_indices, support = np.unique(targets, return_counts=True)
         if len(support) < len(p):
             s = np.zeros_like(p)
@@ -355,12 +370,17 @@ class LogPerClassMetricsToWandb(Callback):
             support = s
             
         data = [f1, p, r, support]
-
-        plt.figure(figsize=(20, 6))
-#         sns.set(font_scale=1.2)
         
-        annot = bool(len(support) < 75)
-        print(f'class_indices={class_indices}')
+        for d in data:
+            print(f"len(d)={len(d)}")
+
+        w = int(len(self.class_names)//10) + 10
+        h = 10
+        plt.figure(figsize=(w, h))
+        annot = bool(len(self.class_names) < 75)
+        xticklabels = self.class_names if annot else []
+        print(f'len(self.class_names)={len(self.class_names)}')
+        print(f'annot: {annot}')
         g = sns.heatmap(
                         data,
                         annot=annot,
@@ -370,17 +390,29 @@ class LogPerClassMetricsToWandb(Callback):
                         fmt=".2f",
                         cmap=cmap,
                         yticklabels=["F1", "Precision", "Recall", "Support"],
-                        xticklabels=self.class_names # [self.class_names[int(i)] for i in class_indices]
+                        xticklabels=xticklabels # [self.class_names[int(i)] for i in class_indices]
                     )
+        plt.suptitle("per-class F1_Precision_Recall -- heatmap")
         g.set_xticklabels(g.get_xticklabels(), rotation=45, horizontalalignment='right', fontsize='medium', fontweight='light')
         g.set_yticklabels(g.get_yticklabels(), rotation=45, horizontalalignment='right', fontsize='medium', fontweight='light')
         plt.subplots_adjust(bottom=0.2, top=0.95, wspace=None, hspace=0.07)
-
-
         # names should be uniqe or else charts from different experiments in wandb will overlap
-        logger.experiment.log({f"val/per_class_f1_p_r_heatmap/{logger.experiment.name}": wandb.Image(plt)}, commit=False)
-
+        logger.experiment.log({f"val/per_class/f1_p_r_heatmap": wandb.Image(plt)}, commit=False)
         plt.clf()
+        
+        
+        num_samples = len(preds)
+        idx = list(range(len(self.class_names)))
+        
+        for j, metric in enumerate(["F1", "Precision", "Recall"]):
+            print(f"metric={metric},", f"len(data[j])={len(data[j])}")
+            metric_data = pd.DataFrame(data[j]).T.to_records()
+            logger.experiment.log({f"val/per_class/{metric}_distributions" : wandb.plot.line_series(xs=idx,
+                                                                                                  ys=metric_data,
+                                                                                                  keys=self.class_names,
+                                                                                                  title=f"per-class {metric} -- time series",
+                                                                                                  xname="family")},
+                                                                                                  commit=False)
 
 
     def _log_confusion_matrix(self, preds: np.ndarray, targets: np.ndarray, logger):
@@ -388,10 +420,10 @@ class LogPerClassMetricsToWandb(Callback):
         Generate confusion_matrix heatmap
         """
         
-        sns_context = "talk"
+        sns_context = "poster"
         sns_style = "seaborn-bright"
         cmap="YlGnBu_r"
-        sns.set_context(context=sns_context, font_scale=0.8)
+        sns.set_context(context=sns_context, font_scale=0.7)
         plt.style.use(sns_style)
         
         confusion_matrix = pd.DataFrame(metrics.confusion_matrix(y_true=targets, y_pred=preds))
@@ -399,19 +431,24 @@ class LogPerClassMetricsToWandb(Callback):
         confusion_matrix = confusion_matrix.T
         confusion_matrix.index.name = "Predicted"
         confusion_matrix = confusion_matrix.T
-        plt.figure(figsize=(14, 8))
+        
+        h = int(len(self.class_names)//10)
+        w = h + 10
+        plt.figure(figsize=(w, h))
+#         plt.figure(figsize=(14, 8))
 #         sns.set(font_scale=1.4)
         
         annot = bool(confusion_matrix.shape[0] < 75)
-
+        xticklabels = self.class_names if annot else []
+        print(f'len(self.class_names)={len(self.class_names)}')
         g = sns.heatmap(confusion_matrix, 
                         annot=annot,
                         linewidths=1,
                         annot_kws={"size": 8},
                         fmt="g",
                         cmap=cmap,
-                        yticklabels=self.class_names,
-                        xticklabels=self.class_names # [self.class_names[int(i)] for i in class_indices]
+                        yticklabels=xticklabels,
+                        xticklabels=xticklabels # [self.class_names[int(i)] for i in class_indices]
                         )
         
         g.set_xticklabels(g.get_xticklabels(), rotation=45, horizontalalignment='right', fontsize='small', fontweight='light')

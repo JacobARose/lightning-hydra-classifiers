@@ -42,7 +42,7 @@ Note:
 import logging
 import os
 from pathlib import Path
-from typing import Union, Callable, Tuple, Optional, Dict, Any
+from typing import Union, Callable, Tuple, Optional, Dict, Any, List
 
 import torch
 import torch.nn.functional as F
@@ -80,9 +80,14 @@ class MilestonesFinetuning(BaseFinetuning):
     
     def __init__(self,
                  milestones: tuple = (3, 5, 10),
+                 unfreeze_init: Optional[str] = None,
+                 unfreeze_curriculum: List[str] = ('layer4', 'layer3', 'layer 2'),
                  train_bn: bool = False):
         super().__init__()
         self.milestones = milestones
+        self.unfreeze_init = unfreeze_init
+        self.unfreeze_curriculum = unfreeze_curriculum
+
         self.train_bn = train_bn
 
     def freeze_before_training(self, pl_module: pl.LightningModule):
@@ -90,21 +95,22 @@ class MilestonesFinetuning(BaseFinetuning):
         This method is called before ``configure_optimizers``
         and should be used to freeze any modules parameters.
         """
-        unfreeze_layers = ['layer4']
-        
-        modules = dict(pl_module.feature_extractor.named_children())
+#         unfreeze_layers = ['layer4']
+        modules = list(dict(pl_module.feature_extractor.named_children()).values())
         num_params = len(modules)
+        if self.unfreeze_init == "all":
+            return
         
-        for k in list(modules.keys()):
-            for l in unfreeze_layers:
-                if k.startswith(l):
-                    modules.pop(k)
-
-        modules = list(modules.values())        
-
-        log.info(f'Freezing {len(modules)} layers before training, out of {num_params}. Unfrozen layer names: {unfreeze_layers}')
-
+        log.info(f'[RUNNING] [freeze_before_training()] Freezing {len(modules)} layers before training, out of {num_params}.') # Unfrozen layer names: {unfreeze_layers}')
         self.freeze(modules=nn.Sequential(*modules), train_bn=self.train_bn)
+        
+#         for k in list(modules.keys()):
+#             for l in unfreeze_layers:
+#                 if k.startswith(l):
+#                     modules.pop(k)
+#         modules = list(modules.values())
+#         log.info(f'Freezing {len(modules)} layers before training, out of {num_params}. Unfrozen layer names: {unfreeze_layers}')
+#         self.freeze(modules=nn.Sequential(*modules), train_bn=self.train_bn)
 
     def finetune_function(self, pl_module: pl.LightningModule, epoch: int, optimizer: Optimizer, opt_idx: int):
         """
@@ -116,29 +122,25 @@ class MilestonesFinetuning(BaseFinetuning):
     .. note:: Make sure to filter the parameters based on ``requires_grad``.
         
         """
+        log.info(f"finetune_function(epoch={epoch})")
         
-        if epoch == self.milestones[0]:
-            unfreeze_layers = ['layer4']
+        unfreeze_layers: List[str] = None
+        if (epoch == 0) and (self.unfreeze_init is not None):
+            unfreeze_layers = [self.unfreeze_init]
             modules = [p for name, p in pl_module.feature_extractor.named_parameters() if name in unfreeze_layers]
             self.unfreeze_and_add_param_group(
                 modules=nn.Sequential(*modules), optimizer=optimizer, train_bn=self.train_bn
             )
-
-        elif epoch == self.milestones[1]:
-            unfreeze_layers = ['layer3']
-            modules = [p for name, p in pl_module.feature_extractor.named_parameters() if name in unfreeze_layers]
-            self.unfreeze_and_add_param_group(
-                modules=nn.Sequential(*modules), optimizer=optimizer, train_bn=self.train_bn
-            )
-
-            
-        if epoch == self.milestones[2]:
-            unfreeze_layers = ['layer2']
-            modules = [p for name, p in pl_module.feature_extractor.named_parameters() if name in unfreeze_layers]
-            self.unfreeze_and_add_param_group(
-                modules=nn.Sequential(*modules), optimizer=optimizer, train_bn=self.train_bn
-            )
-            
+        else:
+            for i, epoch_i in enumerate(self.milestones):
+                if epoch_i == epoch:
+                    unfreeze_layers = self.unfreeze_curriculum[i]
+                    modules = [p for name, p in pl_module.feature_extractor.named_parameters() if name in unfreeze_layers]
+                    break
+            if unfreeze_layers:
+                self.unfreeze_and_add_param_group(
+                    modules=nn.Sequential(*modules), optimizer=optimizer, train_bn=self.train_bn
+                )            
             
             
 #  --- Pytorch-lightning module ---
@@ -228,6 +230,22 @@ class TransferLearningModel(BaseLightningModule):
         scheduler = MultiStepLR(optimizer, milestones=self.milestones, gamma=self.lr_scheduler_gamma)
         return [optimizer], [scheduler]
     
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     
 #     def training_step(self, batch, batch_idx):
 #         # 1. Forward pass:
