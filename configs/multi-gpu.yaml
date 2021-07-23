@@ -4,7 +4,7 @@ defaults:
 
     - trainer: ddp_trainer.yaml
     - model: transfer_learning_model.yaml
-    - datamodule: default_datamodule.yaml
+    - datamodule: standalone_datamodule.yaml #default_datamodule.yaml
     - dataset: fossil_dataset.yaml
 #     - datamodule: fossil_datamodule.yaml # extant_datamodule.yaml # 
     - callbacks: finetune_callbacks.yaml
@@ -66,16 +66,16 @@ hparams:
     pretrained: true
     unfreeze_init: null
     finetune_milestones: [3, 5, 10]
-    unfreeze_curriculum: ['layer4', 'layer3', 'layer 2']
+    unfreeze_curriculum: ['layer4', 'layer3', 'layer2']
 
 
 
-datamodule:
-    config:
-        batch_size: '${hparams.batch_size}'
-        image_size: '${hparams.image_size}'
-        class_type: '${hparams.class_type}'
-        seed: '${seed}'
+# datamodule:
+#     config:
+#         batch_size: '${hparams.batch_size}'
+#         image_size: '${hparams.image_size}'
+#         class_type: '${hparams.class_type}'
+#         seed: '${seed}'
 
 wandb:
     init:

@@ -14,10 +14,10 @@ from pathlib import Path
 import numpy as np
 import numbers
 from lightning_hydra_classifiers.utils import template_utils
-from typing import Union, List, Any, Tuple, Dict
+from typing import Union, List, Any, Tuple, Dict, Optional
 import collections
 from sklearn.model_selection import train_test_split
-
+import json
 log = template_utils.get_logger(__name__)
 
 
@@ -28,17 +28,39 @@ __all__ = ["LabelEncoder", "trainval_split", "trainvaltest_split"]
 class LabelEncoder(object):
     
     """Label encoder for tag labels."""
-    def __init__(self, class2idx: Dict[str,int]=None):
+    def __init__(self,
+                 class2idx: Dict[str,int]=None,
+                 replace: Optional[Dict[str,str]]=None):
         self.class2idx = class2idx or {}
+        self.replace = replace or {}
         self.index2class = {v: k for k, v in self.class2idx.items()}
-        self.classes = list(self.class2idx.keys())
+        self.classes = [k for k in self.class2idx.keys() if k not in self.replace.keys()]
+        
+        self.replace_class2idx_items()
         self.num_samples = 0
 
+        
+    def replace_class2idx_items(self):
+        if (len(self.replace) == 0) \
+        or (len([k for k in self.replace.keys() if k in self.class2idx.keys()]) == 0):
+            return
+        
+        log.info(f'LabelEncoder replacing {len(self.replace.keys())} class encodings with that other an another class')
+        log.info('Replacing: ' + str({k:v for k,v in self.replace.items() if k in self.class2idx}))
+        for old, new in self.replace.items():
+            if old in list(self.class2idx.keys()):
+                self.class2idx[old] = self.class2idx[new]
+        self.index2class = {v: k for k, v in self.class2idx.items()}
+        self.classes = [k for k in self.class2idx.keys() if k not in self.replace.keys()]                
+        
     def __len__(self):
-        return len(self.class2idx)
+        return len(self.classes)
 
     def __str__(self):
-        return f"<LabelEncoder(num_classes={len(self)})>"
+        msg = f"<LabelEncoder(num_classes={len(self)})>"
+        if len(self.replace) > 0:
+            msg += "\n" + f"<num_replaced_classes={len(self.replace)}"
+        return msg
 
     def fit(self, y):
         
@@ -49,12 +71,15 @@ class LabelEncoder(object):
 
         old_num_classes = len(self)
         new_classes = [label for label in classes if label not in self.classes]
-                
+        
         for i, label in enumerate(new_classes):
             self.class2idx[label] = old_num_classes + i
         self.index2class = {v: k for k, v in self.class2idx.items()}
-        self.classes = list(self.class2idx.keys())
         
+        self.classes = [k for k in self.class2idx.keys() if k not in self.replace.keys()]        
+        self.replace_class2idx_items()
+
+        new_classes = [c for c in new_classes if c not in self.replace.keys()]
         if len(new_classes):
             log.debug(f"[FITTING] {len(y)} samples with {len(classes)} classes, adding {len(new_classes)} new class labels. Latest num_classes = {len(self)}")
         assert len(self) == (old_num_classes + len(new_classes))
@@ -83,12 +108,13 @@ class LabelEncoder(object):
         return cls(**kwargs)
     
     def getstate(self):
-        return {"class2idx": self.class2idx}
+        return {"class2idx": self.class2idx,
+                "replace": self.replace}
     
     def __repr__(self):
         disp = f"""<{str(type(self)).strip("'>").split('.')[-1]}>:\n"""
         disp += f"    num_classes: {len(self)}\n"
-        disp += f"    num_samples: {self.num_samples}"
+        disp += f"    fit on num_samples: {self.num_samples}"
         return disp
         
 #     def encode(self, y):
@@ -140,10 +166,6 @@ def trainval_split(x: Union[List[Any],np.ndarray]=None,
                                             stratify=True)
     
     """
-    
-
-    
-    
     
     train_split = 1.0 - val_train_split
     

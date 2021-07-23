@@ -255,18 +255,31 @@ def read_hydra_config(config_dir: str,
 
 
 def configure_datamodule(config: DictConfig) -> pl.LightningDataModule:
-    log.info(f"Instantiating datamodule <{config.datamodule._target_}>")
-    datamodule: pl.LightningDataModule = hydra.utils.instantiate(config.datamodule)
+#     log.info(f"Instantiating datamodule <{config.datamodule._target_}>")
+#     datamodule: pl.LightningDataModule = hydra.utils.instantiate(config.datamodule)
 
+#     try:
+#         datamodule.setup(stage="fit")
+#         config.hparams.classes = datamodule.classes
+#         config.hparams.num_classes = len(config.hparams.classes)
         
-#     import pdb; pdb.set_trace()
-
+#         print(f'config.hparams.num_classes={config.hparams.num_classes}')
+    from lightning_hydra_classifiers.data.common import LeavesLightningDataModule
+        
     try:
-        datamodule.setup(stage="fit")
+        output_dir = "/media/data/jacob/GitHub/prj_fossils_contrastive/notebooks/Extant_family_10_1024_minus_PNAS_family_100_1024"
+
+#         config = DictConfig({"dataset":
+#                                        {"name":"Extant_family_10_minus_PNAS_family_100_512"}
+#                             })
+        config.dataset.config.name = "Extant_family_10_1024_in_PNAS_family_100_1024"
+        datamodule = LeavesLightningDataModule(config=config, #default_config,
+                                               data_dir=output_dir)
         config.hparams.classes = datamodule.classes
         config.hparams.num_classes = len(config.hparams.classes)
+        config.dataset.config.classes = datamodule.classes
+        config.dataset.config.num_classes = len(config.hparams.classes)
         
-        print(f'config.hparams.num_classes={config.hparams.num_classes}')
     except Exception as e:
         print(e)
         pass

@@ -81,7 +81,7 @@ class MilestonesFinetuning(BaseFinetuning):
     def __init__(self,
                  milestones: tuple = (3, 5, 10),
                  unfreeze_init: Optional[str] = None,
-                 unfreeze_curriculum: List[str] = ('layer4', 'layer3', 'layer 2'),
+                 unfreeze_curriculum: List[str] = ('layer4', 'layer3', 'layer2'),
                  train_bn: bool = False):
         super().__init__()
         self.milestones = milestones
@@ -102,6 +102,7 @@ class MilestonesFinetuning(BaseFinetuning):
             return
         
         log.info(f'[RUNNING] [freeze_before_training()] Freezing {len(modules)} layers before training, out of {num_params}.') # Unfrozen layer names: {unfreeze_layers}')
+        log.info(f'[EXPECT] Plan to unfreeze at layer={self.unfreeze_curriculum[0]} at the next milestone, epoch={self.milestones[0]}')
         self.freeze(modules=nn.Sequential(*modules), train_bn=self.train_bn)
         
 #         for k in list(modules.keys()):
@@ -123,6 +124,12 @@ class MilestonesFinetuning(BaseFinetuning):
         
         """
         log.info(f"finetune_function(epoch={epoch})")
+        i = np.where(np.array(self.milestones)==epoch)[0]
+        if len(i):
+            i = i[0]
+            log.info(f'Unfreezing at layer={self.unfreeze_curriculum[i]} at current milestone #{i} out of {len(self.milestones)}, epoch={self.milestones[i]}')
+        else:
+            log.info(f"epoch={epoch}, proceeding with alteration to frozen/unfrozen layers")
         
         unfreeze_layers: List[str] = None
         if (epoch == 0) and (self.unfreeze_init is not None):
