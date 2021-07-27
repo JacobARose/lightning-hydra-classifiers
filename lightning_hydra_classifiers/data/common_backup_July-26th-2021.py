@@ -56,7 +56,7 @@ __all__ = ['LeavesDataset', 'LeavesLightningDataModule', 'seed_worker', 'plot_cl
 
 # __all__ = ['LeavesDataset', 'LeavesLightningDataModule', 'seed_worker', 'TrainValSplitDataset', 'SubsetImageDataset', 'plot_class_distributions',
 # 'plot_trainvaltest_splits']
-
+"testing";
 #         if trainer.is_global_zero and trainer.logger:
 #             trainer.logger.after_save_checkpoint(proxy(self))
 #########################################################
@@ -68,7 +68,40 @@ __all__ = ['LeavesDataset', 'LeavesLightningDataModule', 'seed_worker', 'plot_cl
 from dataclasses import dataclass
 
 
+@dataclass
+class DatasetConfig:
+    name: str
+    dataset: str=None
+    collection: str=None
+    resolution: int=None
+        
+    num_files: Optional[int]=None
+    num_classes: Optional[int]=None
+    class_type: str="family"
+    path_schema: str = "{family}_{genus}_{species}_{collection}_{catalog_number}"
+                
+        
+    def __init__(self, name: str, **kwargs):
+        self.name = name
+        parts = self.name.split("_")
+        self.resolution = int(parts[-1])
+        if len(parts)==3:
+            self.dataset = parts[1]
+            self.collection = "_".join(parts[:2])
+        elif len(parts)==2:    
+            self.dataset = parts[0]
+            self.collection = ["_".join([c, self.dataset]) for c in fossil_collections.keys()]
+            
+        self.__dict__.update(kwargs)        
+        
 
+    def __repr__(self):
+        disp = f"""<{str(type(self)).strip("'>").split('.')[1]}>:"""
+        
+        disp += "\nFields:\n"
+        for k in self.__dataclass_fields__.keys():
+            disp += f"    {k}: {getattr(self,k)}\n"
+        return disp
 
 
 

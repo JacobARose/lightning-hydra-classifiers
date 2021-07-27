@@ -26,6 +26,83 @@ to your `README.md`.
 <br><br>
 -->
 
+
+## Development Notes
+Notes on refactoring, strategy, intuition  
+(Added by Jacob A Rose Monday July 26th, 2021)
+
+
+#### data, datasets, datamodules
+
+Configuration & modularity
+Necessary data functionality should be clearly separated into:
+1. Pre-experiment preprocessing  
+    A. Extraction  
+    B. Splitting  
+2. During-experiment  
+    A. Extraction  
+    B. Splitting  
+    C. Sample Loading  
+    D. Processing  
+    E. Sample Augmentation (train only)  
+    F. Batch Loading  
+    G. Batch Augmentation (train only)  
+
+(1A. vs. 2A.) and (1B. vs. 2B.) share common logic, but differ in how much they trade off experimental flexibility vs. cognitive load
+
+
+
+A & B: Dataset Extraction & Splitting
+---
+#### A. Extraction
+I. Extracting Image paths on disk, organized into `root_dir/class_subdir/image_i.jpg` format.  
+II. Extracting Image paths & labels from pre-compiled csv files.  
+
+#### B. Splitting
+ For a given dataset, it might have 1, 2 or 3 root_dirs.  
+    A. If 1 root_dir, then user must load, then split into train, val, and test subsets  
+    B. If 2 root_dirs, then user must load train & test root_dirs, then split train into train & val subsets.  
+    C. If 3 root_dirs, then user must simply load train, val, and test subsets as is.  
+
+At the moment, only A. and B. are really an issue. Thus, at run-time, user must be prepared to handle either a single root_dir for all data subsets, or a pair of `train/` and `test/` root_dirs. For consistency between experiments, clearly `B.` is preferable so we're always referencing the same test set.
+
+II. Extracting labels:   
+
+    A. If simple single-label classification, then labels can be assigned by taking the image's parent dir name `class_subdir`.  
+    B. If max flexibility is required, multi-labels can be extracted from image's filename. e.g. `"{family}_{genus}_{species}_{collection}_{catalog_number}.jpg"`  
+        * Note: Each dataset might have its own image filename schema. Need to identify robust way of detecting this. Currently, PNAS differs from the rest.
+
+
+
+
+### Overall plan:
+
+1. Pre-experiment preprocessing  
+    * A. Extraction: Parse on-disk image file trees to generate a main csv catalog of (path, label_0, label_1, ...) rows.  
+        - If both train/ and test/ directories exist, create the above csv by concatenation. Create train.csv and test.csv, respectively.
+        - If only a single root_dir/ exists, generate main csv as-is.  Then create a reproducible train-test split to ensure a constant test set.
+    ```
+    dataset_dir/
+        images/
+            class_i/
+                image_0.jpg
+        
+        catalogs/
+            full_dataset.csv
+            catalog_splits/
+                train.csv
+                test.csv
+
+    ```
+
+    * B. Splitting: User provides directory containing input csvs: train.csv and a test.csv. For each  experiment, provide an output_dir to which the full train.csv, val.csv, and test.csv files will be saved.  
+        - Output train.csv, val.csv, and test.csv into clearly labeled directory, ideally with a log file documenting their creation.  
+        - During experiment, config file will only reference this output_dir. Thus, each set of splits must be generated prior to configuring or running any experiment. A bit more laborious/manual but my hope is this will ensure due diligence & minimize dataset configuration complexity at runtime.
+
+
+
+-----------------------------
+
 ## Introduction
 This template tries to be as general as possible - you can easily delete any unwanted features from the pipeline or rewire the configuration, by modifying behavior in [src/train.py](src/train.py).
 
@@ -45,6 +122,10 @@ It makes your code neatly organized and provides lots of useful features, like a
 <br>
 <br>
 <br>
+
+
+
+
 
 
 ## Main Ideas Of This Template
