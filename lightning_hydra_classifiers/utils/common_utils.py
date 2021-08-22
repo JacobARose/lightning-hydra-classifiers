@@ -11,17 +11,22 @@ Author: Jacob A Rose
 
 import os
 from pathlib import Path
+import pandas as pd
 import numpy as np
 import numbers
-from lightning_hydra_classifiers.utils import template_utils
-from typing import Union, List, Any, Tuple, Dict, Optional
+from typing import Union, List, Any, Tuple, Dict, Optional, Sequence
 import collections
 from sklearn.model_selection import train_test_split
 import json
+from lightning_hydra_classifiers.utils import template_utils
+from lightning_hydra_classifiers.utils.plot_utils import colorbar
+
+
 log = template_utils.get_logger(__name__)
 
 
-__all__ = ["LabelEncoder", "trainval_split", "trainvaltest_split"]
+__all__ = ["LabelEncoder", "trainval_split", "trainvaltest_split", "plot_split_distributions", "plot_class_distributions",
+           "filter_df_by_threshold", "compute_class_counts"]
 
 
 
@@ -88,7 +93,7 @@ class LabelEncoder(object):
     def encode(self, y):
         if not hasattr(y,"__len__"):
             y = [y]
-        print(self.class2idx)
+#         print(self.class2idx)
         return np.array([self.class2idx[label] for label in y])
 
     def decode(self, y):
@@ -278,6 +283,199 @@ def trainvaltest_split(x: Union[List[Any],np.ndarray]=None,
     return {"train":(x_train, y_train),
             "val":(x_val, y_val),
             "test":(x_test, y_test)}
+
+
+#############################################################
+#############################################################
+
+
+def plot_class_distributions(targets: List[Any], 
+                             sort_by: Optional[Union[str, bool, Sequence]]="count",
+                             ax=None,
+                             xticklabels: bool=True):
+    """
+    Example:
+        counts = plot_class_distributions(targets=data.targets, sort=True)
+    """
+    
+    counts = compute_class_counts(targets,
+                                  sort_by=sort_by)
+                        
+    keys = list(counts.keys())
+    values = list(counts.values())
+
+    if ax is None:
+        plt.figure(figsize=(20,12))
+    ax = sns.histplot(x=keys, weights=values, discrete=True, ax=ax)
+    plt.sca(ax)
+    if xticklabels:
+        xtick_fontsize = "medium"
+        if len(keys) > 100:
+            xtick_fontsize = "x-small"
+        elif len(keys) > 75:
+            xtick_fontsize = "small"
+        plt.xticks(
+            rotation=90, #45, 
+            horizontalalignment='right',
+            fontweight='light',
+            fontsize=xtick_fontsize
+        )
+        if len(keys) > 100:
+            for label in ax.xaxis.get_ticklabels()[::2]:
+                label.set_visible(False)
+        
+    else:
+        ax.set_xticklabels([])
+    
+    return counts
+
+
+#############################################################
+#############################################################
+
+
+def plot_split_distributions(data_splits: Dict[str, "CommonDataset"]):
+    """
+    Create 3 vertically-stacked count plots of train, val, and test dataset class label distributions
+    """
+    assert isinstance(data_splits, dict)
+    num_splits = len(data_splits)
+    
+    if num_splits < 4:
+        rows = num_splits
+        cols = 1
+    else:
+        rows = int(num_splits // 2)
+        cols = int(num_splits % 2)
+    fig, ax = plt.subplots(rows, cols, figsize=(20*cols,10*rows))
+    ax = ax.flatten()
+    
+    
+    train_key = [k for k,v in data_splits.items() if "train" in k]
+    sort_by = True
+    if len(train_key)==1:
+        sort_by = compute_class_counts(data_splits[train_key[0]].targets,
+                                       sort_by="count")
+        log.info(f'Sorting by count for {train_key} subset, and applying order to all other subsets')
+#         log.info(f"len(sort_by)={len(sort_by)}")
+
+    num_classes = len(set(list(data_splits.values())[0].targets))    
+    xticklabels=False
+    num_samples = 0
+    counts = {}
+    for i, (k, v) in enumerate(data_splits.items()):
+        if i == len(data_splits)-1:
+            xticklabels=True
+        counts[k] = plot_class_distributions(targets=v.targets, 
+                                             sort_by=sort_by,
+                                             ax = ax[i],
+                                             xticklabels=xticklabels)
+        num_nonzero_classes = len([name for name, count_i in counts[k].items() if count_i > 0])
+        
+        title = f"{k} [n={len(v)}"
+        if num_nonzero_classes < num_classes:
+            title += f", num_classes@(count > 0) = {num_nonzero_classes}-out-of-{num_classes} classes in dataset"
+        title += "]"
+        plt.gca().set_title(title, fontsize='large')
+        
+        num_samples += len(v)
+    
+    suptitle = '-'.join(list(data_splits.keys())) + f"_splits (total samples={num_samples}, total classes = {num_classes})"
+    
+    plt.suptitle(suptitle, fontsize='x-large')
+    plt.subplots_adjust(bottom=0.1, top=0.94, wspace=None, hspace=0.08)
+    
+    return fig, ax
+
+
+#############################################################
+#############################################################
+
+
+# def plot_trainvaltest_splits(train_data,
+#                              val_data,
+#                              test_data):
+#     """
+#     Create 3 vertically-stacked count plots of train, val, and test dataset class label distributions
+#     """
+#     fig, ax = plt.subplots(3, 1, figsize=(16,8*3))
+
+#     train_counts = plot_class_distributions(targets=train_data.targets, sort_by=True, ax = ax[0], xticklabels=False)
+#     plt.gca().set_title(f"train (n={len(train_data)})", fontsize='large')
+#     sort_classes = train_counts.keys()
+
+#     val_counts = plot_class_distributions(targets=val_data.targets, ax = ax[1], sort_by=sort_classes, xticklabels=False)
+#     plt.gca().set_title(f"val (n={len(val_data)})", fontsize='large')
+#     test_counts = plot_class_distributions(targets=test_data.targets, ax = ax[2], sort_by=sort_classes)
+#     plt.gca().set_title(f"test (n={len(test_data)})", fontsize='large')
+
+#     num_samples = len(train_data) + len(val_data) + len(test_data)
+    
+#     plt.suptitle(f"Train-Val-Test_splits (total={num_samples})", fontsize='x-large')
+
+#     plt.subplots_adjust(bottom=0.1, top=0.95, wspace=None, hspace=0.07)
+    
+#     return fig, ax
+
+
+#############################################################
+#############################################################
+
+
+def filter_df_by_threshold(df: pd.DataFrame,
+                           threshold: int,
+                           y_col: str='family'):
+    """
+    Filter rare classes from dataset in a pd.DataFrame
+    
+    Input:
+        df (pd.DataFrame):
+            Must contain at least 1 column with name given by `y_col`
+        threshold (int):
+            Exclude any rows from df that contain a `y_col` value with fewer than `threshold` members in all of df.
+        y_col (str): default="family"
+            The column in df to look for rare classes to exclude.
+    Output:
+        (pd.DataFrame):
+            Returns a dataframe with the same number of columns as df, and an equal or lower number of rows.
+    """
+    return df.groupby(y_col).filter(lambda x: len(x) >= threshold)
+
+
+#############################################################
+#############################################################
+
+
+
+def compute_class_counts(targets: Sequence,
+                         sort_by: Optional[Union[str, bool, Sequence]]="count"
+                        ) -> Dict[str, int]:
+    
+    counts = collections.Counter(targets)
+#     if hasattr(sort_by, "__len__"):
+    if isinstance(sort_by, dict):
+        counts = {k: counts[k] for k in sort_by.keys()}
+    if isinstance(sort_by, list):
+        counts = {k: counts[k] for k in sort_by}
+    elif (sort_by == "count"):
+        counts = dict(sorted(counts.items(), key = lambda x:x[1], reverse=True))
+    elif (sort_by is True):
+        counts = dict(sorted(counts.items(), key = lambda x:x[0], reverse=True))
+        
+    return counts
+
+#############################################################
+#############################################################
+
+
+
+
+
+
+
+
+
+
 
 
 
