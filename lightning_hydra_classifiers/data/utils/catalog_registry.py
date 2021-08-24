@@ -277,6 +277,13 @@ class available_datasets:
         for k,v in self.versions.items():
             out += f"{k}:" + "\n" + v.__repr__() + "\n"
         return out
+    
+    @classmethod
+    def get_latest(cls, tag: str) -> Union[str, List[str]]:
+        if "PNAS" in tag:
+            return cls.get(tag, version="v0_3")
+        else:
+            return cls.get(tag, version="v1_0")
 
     @classmethod
     def get(cls, tag: str, version: str="v1_0") -> Union[str, List[str]]:
