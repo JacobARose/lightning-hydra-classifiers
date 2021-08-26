@@ -42,20 +42,24 @@ from torchvision.datasets import ImageFolder, folder, vision
 from torchvision.transforms import functional as F
 
 from lightning_hydra_classifiers.utils import template_utils
-from lightning_hydra_classifiers.utils.common_utils import (LabelEncoder,
-                                                            trainval_split,
-                                                            trainvaltest_split)
+from lightning_hydra_classifiers.utils.common_utils import filter_df_by_threshold
+
+from lightning_hydra_classifiers.utils.dataset_management_utils import (save_config,
+                                                                        load_config,
+                                                                        DataSplitter,
+                                                                        export_image_data_diagnostics,
+                                                                        export_dataset_to_csv,
+                                                                        import_dataset_from_csv)
+from lightning_hydra_classifiers.utils.plot_utils import colorbar, display_images
+
 # from sklearn.model_selection import train_test_split
 
 
 log = template_utils.get_logger(__name__)
 
-__all__ = ['LeavesDataset', 'LeavesLightningDataModule', 'seed_worker', 'plot_class_distributions', 'plot_trainvaltest_splits', 
-           'plot_split_distributions', "save_config", "load_config", "export_image_data_diagnostics", "export_dataset_to_csv", "import_dataset_from_csv"]
+__all__ = ['LeavesDataset', 'LeavesLightningDataModule', 
+           'PathSchema', 'seed_worker'] #, "save_config", "load_config", "export_image_data_diagnostics", "export_dataset_to_csv", "import_dataset_from_csv"]
 
-
-# __all__ = ['LeavesDataset', 'LeavesLightningDataModule', 'seed_worker', 'TrainValSplitDataset', 'SubsetImageDataset', 'plot_class_distributions',
-# 'plot_trainvaltest_splits']
 
 #         if trainer.is_global_zero and trainer.logger:
 #             trainer.logger.after_save_checkpoint(proxy(self))
@@ -66,13 +70,6 @@ __all__ = ['LeavesDataset', 'LeavesLightningDataModule', 'seed_worker', 'plot_cl
 # fossil_collections = {"Florissant":"florissant_fossil",
 #                       "Wilf":"wilf_fossil"}
 from dataclasses import dataclass
-
-
-
-
-
-
-
 
 @dataclass 
 class PathSchema:
@@ -100,146 +97,31 @@ class PathSchema:
         return family, genus, species, collection, catalog_number
     
 
-
 totensor: Callable = torchvision.transforms.ToTensor()
 toPIL: Callable = torchvision.transforms.ToPILImage("RGB")
 
-    
-class CommonDataSplitter:
-        
-    valid_splits: Tuple[str] = ("train", "val", "test")
-
-    @classmethod
-    def get_split_subdir_stems(cls, dataset_dir: str):
-        
-        subdirs = os.listdir(dataset_dir)
-        stems = []
-        for subdir in subdirs:
-            if subdir in cls.valid_splits:
-                stems.append(subdir)
-        return stems
-        
-    @classmethod
-    def locate_files(cls,
-                     dataset_dir: str,
-                     select_subset: Optional[str]=None):
-
-        files = {}
-        splits = cls.get_split_subdir_stems(dataset_dir=dataset_dir)
-        
-        if len(splits) > 1:
-            # root
-            #     /train
-            #          /class_0
-            #     /test
-            #     ....
-            for subdir in splits:
-                files[subdir] = TorchFiles.from_folder(Path(dataset_dir, subdir), regex="*/*.jpg").files 
-            files["all"] = list(flatten([files[subdir] for subdir in splits]))
-            
-        elif len(os.listdir(dataset_dir)) > 1:
-            # root
-            #     /class_0
-            #     /class_1
-            #     ....
-            files["all"] = TorchFiles.from_folder(Path(dataset_dir), regex="*/*.jpg").files
-        else:
-            raise Exception(f"# of valid subdirs = {len(os.listdir(dataset_dir))} is invalid for locating files.")
-
-        if isinstance(select_subset, str):
-            files = {select_subset: files[select_subset]}
-
-        return files
+###########################################
+###########################################
 
 
-    @classmethod
-    def create_trainvaltest_splits(cls,
-                                   data: torchdata.Dataset,
-                                   test_split: Union[str, float]=0.3,
-                                   val_train_split: float=0.2,
-                                   shuffle: bool=True,
-                                   seed: int=3654,
-                                   stratify: bool=True,
-                                   plot_distributions: bool=False) -> Tuple["FossilDataset"]:
-        if (test_split == "test") or (test_split is None):
-            train_split = 1 - val_train_split
-            if hasattr(data, f"test_dataset"):
-                data = getattr(data, f"train_dataset")            
-        elif isinstance(test_split, float):
-            train_split = 1 - (test_split + val_train_split)
-        else:
-            raise ValueError(f"Invalid split arguments: val_train_split={val_train_split}, test_split={test_split}")
-            
 
-        splits=(train_split, val_train_split, test_split)
-        splits = list(filter(lambda x: isinstance(x, float), splits))
-        y = data.targets
-        
-        if len(splits)==2:
-            data_splits = trainval_split(x=None,
-                                         y=y,
-                                         val_train_split=splits[-1],
-                                         random_state=seed,
-                                         stratify=stratify)
-            
-        else:
-            data_splits = trainvaltest_split(x=None,
-                                             y=y,
-                                             splits=splits,
-                                             random_state=seed,
-                                             stratify=stratify)
-        dataset_splits={}
-        for split, (split_idx, split_y) in data_splits.items():
-            print(split, len(split_idx))
-            dataset_splits[split] = data.select_subset_from_indices(indices=split_idx,
-                                                                    x_col = 'path',
-                                                                    y_col = "family")
-        
-        label_encoder = LabelEncoder() # class2idx)
-        label_encoder.fit(dataset_splits["train"].targets)
-        
-        for d in [*list(dataset_splits.values()), data]:
-            d.label_encoder = label_encoder
-#             d.config.num_classes = len(d.label_encoder)
-#             d.config.num_samples = len(d)        
-        
-#         if plot_distributions:
-#             cls.plot_trainvaltest_splits(train_data,
-#                                          val_data,
-#                                          test_data)
 
-        log.debug(f"[RUNNING] [create_trainvaltest_splits()] splits={splits}")
-        return dataset_splits
-    
-    @staticmethod
-    def plot_trainvaltest_splits(train_data,
-                                 val_data,
-                                 test_data):
-    
-        fig, ax = plot_trainvaltest_splits(train_data,
-                                           val_data,
-                                           test_data)
-        return fig, ax
+###########################################
+###########################################
 
-    
-    
-TorchFiles = torchdata.datasets.Files
-    
+
 class CommonDataSelect(torchdata.datasets.Files):
     
     def __init__(self,
                  name: str=None,
                  files: List[Path]=None,
                  subset_key: str=None,
-#                  class2idx: Optional[Dict[str,int]]=None,
                  **kwargs):
         super().__init__(files=files, **kwargs)
         if name:
             self.name = name
         if subset_key:
             self.subset_key = subset_key
-#         if class2idx or not hasattr(self, "label_encoder"):
-#             self.label_encoder = LabelEncoder(class2idx=class2idx)
     
     
     @classmethod
@@ -274,11 +156,8 @@ class CommonDataSelect(torchdata.datasets.Files):
         return data
 
 
-
-
     def select_subset_from_indices(self,
                                    indices: Sequence,
-#                                    update_class2idx: bool=False,
                                    x_col = 'path',
                                    y_col = "family",
                                    subset_key: str = None,
@@ -305,18 +184,15 @@ class CommonDataSelect(torchdata.datasets.Files):
             self.__init__(config = self.config,
                           files=files,
                           subset_key=subset_key)
-#                           class2idx=class2idx)
             return None
 
         return type(self)(config = self.config,
                           files=files,
                           subset_key=subset_key)
-#                           class2idx=class2idx)
 
 
     def filter_samples_by_threshold(self,
                                     threshold: int=1,
-#                                     update_class2idx: bool=True,
                                     x_col = 'path',
                                     y_col = "family",
                                     subset_key: str = None,
@@ -358,15 +234,13 @@ class CommonDataSelect(torchdata.datasets.Files):
                           files=files,
                           subset_key=subset_key)
 
-
-
-
-
-
+###########################################
+###########################################
 
 class CommonDataArithmetic: # (CommonDataset):
     
-    
+    def __init__(self):
+        pass
     @property
     def samples_df(self):        
         data_df = pd.DataFrame(self.samples)
@@ -393,7 +267,16 @@ class CommonDataArithmetic: # (CommonDataset):
         
         intersection = samples_df.merge(other_df, how='inner', on=self.id_col)
         return intersection
-
+    
+    def __add__(self, other):
+    
+        intersection = self.intersection(other)
+        samples_df = self.samples_df
+        
+        left_union = samples_df[samples_df[self.id_col].apply(lambda x: x in intersection[self.id_col])]
+        
+        return left_union
+    
     def __sub__(self, other):
     
         intersection = self.intersection(other)
@@ -404,23 +287,11 @@ class CommonDataArithmetic: # (CommonDataset):
         return remainder
 
 
-
-
-
-
-
-    
-#     splits_on_disk : Tuple[str] = tuple()
-#     transform = None
-#     target_transform = None
-#     totensor: Callable = torchvision.transforms.ToTensor()
-#     toPIL: Callable = torchvision.transforms.ToPILImage("RGB")
-
 ############################################################
 ############################################################
 
 
-class CommonDataset(CommonDataArithmetic, CommonDataSelect, CommonDataSplitter):
+class CommonDataset(CommonDataArithmetic, CommonDataSelect):
     """
     Meant to be a general custom class for handling the most common standard data formats.
     
@@ -469,7 +340,7 @@ class CommonDataset(CommonDataArithmetic, CommonDataSelect, CommonDataSplitter):
         if hasattr(files, "files"):
             files = files.files
         super().__init__(files=files, subset_key=subset_key, *args, **kwargs)
-                
+
         self.samples = [self.parse_sample(idx) for idx in range((len(self)))]
         self.targets = [sample[1] for sample in self.samples]
         
@@ -540,7 +411,6 @@ class CommonDataset(CommonDataArithmetic, CommonDataSelect, CommonDataSplitter):
         return cls(**init_params)
 
         
-
     @classmethod
     def from_dataset(cls, other):
         init_params = other.init_params
@@ -575,7 +445,7 @@ class CommonDataset(CommonDataArithmetic, CommonDataSelect, CommonDataSplitter):
         if (config.test_split is None) and (config.val_train_split is None or config.val_train_split==0.0):
             dataset_splits = {"train": self}
         else:
-            dataset_splits = self.create_trainvaltest_splits(data=self,
+            dataset_splits = DataSplitter.create_trainvaltest_splits(data=self,
                                                              test_split=config.test_split,
                                                              val_train_split=config.val_train_split,
                                                              shuffle=True,
@@ -679,7 +549,7 @@ class CommonDataset(CommonDataArithmetic, CommonDataSelect, CommonDataSplitter):
     
         
     def parse_sample(self, index: int):
-        path = self.files[index]        
+        path = self.files[index]
         family, genus, species, collection, catalog_number = self.path_schema.parse(path)
 
         return self.SampleSchema(path=path,
@@ -707,8 +577,7 @@ class CommonDataset(CommonDataArithmetic, CommonDataSelect, CommonDataSplitter):
         if self.target_transform is not None:
             target = self.target_transform(target)
 
-#         if not self.image_return_type == "tensor":
-#             image = self.toPIL(image)
+
         image = totensor(image)
             
         return tuple(self.return_signature(image=image, target=target, path=path))
@@ -774,7 +643,8 @@ class CommonDataset(CommonDataArithmetic, CommonDataSelect, CommonDataSplitter):
         batch = (torch.stack([item[0] for item in batch]),
                  torch.Tensor(np.array([(item[1]) for item in batch])).to(int))
         return batch
-        
+
+    
     def show_batch(self,
                    indices: Union[int,List[int]]=64,
                    repeat_n: Optional[int]=1,
@@ -983,7 +853,8 @@ class LoggingDataModule(pl.LightningDataModule):
 
 
 
-
+###########################################
+###########################################
 
 
 
@@ -1074,10 +945,7 @@ class LeavesLightningDataModule(LoggingDataModule): #pl.LightningDataModule):
             config = default_config
         else:
             config = OmegaConf.merge(default_config, config)
-        
-#         import pdb;pdb.set_trace()
-        
-        
+                
 
         config = self.parse_config(config)
         self.dataset_config = config.dataset
@@ -1154,26 +1022,11 @@ class LeavesLightningDataModule(LoggingDataModule): #pl.LightningDataModule):
         if "shuffle" in config:
             self.shuffle = config.shuffle
             
-            
-#         if "dataset" not in config:
-#             if "config" in config:
-                
-#                 config = DictConfig({"dataset":config})
-#             else:
-#                 config = DictConfig({"dataset":{
-#                                             "config":config
-#                                                }
-#                                     })
-                
                 
         config.dataset = dataset_config
-            
-            
-
         return config
         
-        
-        
+
     def setup(self,
               stage: str=None,
               train_transform: Optional[Callable] = None,
@@ -1211,14 +1064,6 @@ class LeavesLightningDataModule(LoggingDataModule): #pl.LightningDataModule):
                            train_transform: Optional[Callable] = None,
                            eval_transform: Optional[Callable] = None):
         
-#         self.train_transform = train_transform or self.default_train_transforms(augment=self.augment,
-#                                                                                 normalize=self.normalize,
-#                                                                                 grayscale=self.grayscale,
-#                                                                                 channels=self.channels)
-#         self.eval_transform = eval_transform or self.default_eval_transforms(normalize=self.normalize,
-#                                                                              resize_PIL=True,
-#                                                                              grayscale=self.grayscale,
-#                                                                              channels=self.channels)   
         default_transforms = self.get_default_transforms()
         self.train_transform = train_transform or default_transforms[0]
         self.eval_transform = eval_transform or default_transforms[1]
@@ -1229,8 +1074,6 @@ class LeavesLightningDataModule(LoggingDataModule): #pl.LightningDataModule):
                    target_transform=None)
         
         
-        
-
     def get_dataset(self, stage: str='train'):
         if stage=='train': return self.train_dataset
         if stage=='val': return self.val_dataset
@@ -1415,75 +1258,7 @@ class LeavesLightningDataModule(LoggingDataModule): #pl.LightningDataModule):
         
 
 #######################################################
-
-
-
-class CommonLeavesError(ValueError):
-    
-    def __init__(self, obj: str=None, msg: str=None):
-        if msg is None:
-            # Set some default useful error message
-            msg = "An error occured with Leaves object:\n %s" % str(obj)
-        super().__init__(msg)
-        self.obj = obj
-
-class DataStageError(CommonLeavesError):
-    def __init__(self, requested_stage, valid_stages):
-        msg = f"'{requested_stage}' is not in the set of valid stages, must provide one of the following:\n     "
-        msg += str(valid_stages)
-        super().__init__(msg)
-
-
 #######################################################
-
-
-
-def display_images(
-                   images: List[Image.Image],
-                   labels: Optional[List[str]]=None,
-                   max_images: int=32,
-                   columns: int=5,
-                   width: int=20,
-                   height: int=12,
-                   label_wrap_length: int=50,
-                   label_font_size: int="medium") -> None:
-
-    if len(images) > max_images:
-        print(f"Showing {max_images} images of {len(images)}:")
-        images=images[0:max_images]
-
-    rows = int(len(images)/columns)
-#     height = max(height, rows * height)
-    plt.subplots(rows, columns, figsize=(width, height), sharex=True, sharey=True)
-    for i, image in enumerate(images):
-
-        plt.subplot(rows + 1, columns, i + 1)
-        plt.imshow(image)
-        ax = plt.gca()
-        for label in ax.xaxis.get_ticklabels():
-            label.set_visible(False)
-        for label in ax.yaxis.get_ticklabels():
-            label.set_visible(False)
-        ax.set_xticklabels([])
-        ax.set_yticklabels([])
-        
-        title=None
-        if isinstance(labels, list):
-            title = labels[i]
-        elif hasattr(image, 'filename'):
-            title=image.filename
-            
-        if title:
-#             if title.endswith("/"): title = title[:-1]
-            title=Path(title).stem
-            title=textwrap.wrap(title, label_wrap_length)
-            title="\n".join(title)
-            plt.title(title, fontsize=label_font_size); 
-
-    plt.subplots_adjust(left=None, bottom=0.05, right=None, top=0.9, wspace=0.0, hspace=0.2*rows) #wspace=0.05, hspace=0.1)
-
-
-
 #######################################################
 
 
@@ -1494,204 +1269,9 @@ def seed_worker(worker_id):
     
 
 #######################################################
-# TODO: Move the following elsewhere
-
-def filter_df_by_threshold(df: pd.DataFrame,
-                           threshold: int,
-                           y_col: str='family'):
-    """
-    Filter rare classes from dataset in a pd.DataFrame
-    
-    Input:
-        df (pd.DataFrame):
-            Must contain at least 1 column with name given by `y_col`
-        threshold (int):
-            Exclude any rows from df that contain a `y_col` value with fewer than `threshold` members in all of df.
-        y_col (str): default="family"
-            The column in df to look for rare classes to exclude.
-    Output:
-        (pd.DataFrame):
-            Returns a dataframe with the same number of columns as df, and an equal or lower number of rows.
-    """
-    return df.groupby(y_col).filter(lambda x: len(x) >= threshold)
-
-
-
-
-import collections
-
-import matplotlib.pyplot as plt
-import seaborn as sns
-
-sns.set_context(context='talk', font_scale=0.8)
-sns.set_style('darkgrid')
-sns.set_palette('Set2')
-# sns.set_style("whitegrid")
-
-def compute_class_counts(targets: Sequence,
-                         sort_by: Optional[Union[str, bool, Sequence]]="count"
-                        ) -> Dict[str, int]:
-    
-    counts = collections.Counter(targets)
-#     if hasattr(sort_by, "__len__"):
-    if isinstance(sort_by, dict):
-        counts = {k: counts[k] for k in sort_by.keys()}
-    if isinstance(sort_by, list):
-        counts = {k: counts[k] for k in sort_by}
-    elif (sort_by == "count"):
-        counts = dict(sorted(counts.items(), key = lambda x:x[1], reverse=True))
-    elif (sort_by is True):
-        counts = dict(sorted(counts.items(), key = lambda x:x[0], reverse=True))
-        
-    return counts
-
-def plot_class_distributions(targets: List[Any], 
-                             sort_by: Optional[Union[str, bool, Sequence]]="count",
-                             ax=None,
-                             xticklabels: bool=True):
-    """
-    Example:
-        counts = plot_class_distributions(targets=data.targets, sort=True)
-    """
-    
-    counts = compute_class_counts(targets,
-                                  sort_by=sort_by)
-                        
-    keys = list(counts.keys())
-    values = list(counts.values())
-
-    if ax is None:
-        plt.figure(figsize=(20,12))
-    ax = sns.histplot(x=keys, weights=values, discrete=True, ax=ax)
-    plt.sca(ax)
-    if xticklabels:
-        xtick_fontsize = "medium"
-        if len(keys) > 100:
-            xtick_fontsize = "x-small"
-        elif len(keys) > 75:
-            xtick_fontsize = "small"
-        plt.xticks(
-            rotation=90, #45, 
-            horizontalalignment='right',
-            fontweight='light',
-            fontsize=xtick_fontsize
-        )
-        if len(keys) > 100:
-            for label in ax.xaxis.get_ticklabels()[::2]:
-                label.set_visible(False)
-        
-    else:
-        ax.set_xticklabels([])
-    
-    return counts
-
-
-def plot_split_distributions(data_splits: Dict[str, CommonDataset]):
-    """
-    Create 3 vertically-stacked count plots of train, val, and test dataset class label distributions
-    """
-    assert isinstance(data_splits, dict)
-    num_splits = len(data_splits)
-    
-    if num_splits < 4:
-        rows = num_splits
-        cols = 1
-    else:
-        rows = int(num_splits // 2)
-        cols = int(num_splits % 2)
-    fig, ax = plt.subplots(rows, cols, figsize=(20*cols,10*rows))
-    ax = ax.flatten()
-    
-    
-    train_key = [k for k,v in data_splits.items() if "train" in k]
-    sort_by = True
-    if len(train_key)==1:
-        sort_by = compute_class_counts(data_splits[train_key[0]].targets,
-                                       sort_by="count")
-        log.info(f'Sorting by count for {train_key} subset, and applying order to all other subsets')
-#         log.info(f"len(sort_by)={len(sort_by)}")
-
-    num_classes = len(set(list(data_splits.values())[0].targets))    
-    xticklabels=False
-    num_samples = 0
-    counts = {}
-    for i, (k, v) in enumerate(data_splits.items()):
-        if i == len(data_splits)-1:
-            xticklabels=True
-        counts[k] = plot_class_distributions(targets=v.targets, 
-                                             sort_by=sort_by,
-                                             ax = ax[i],
-                                             xticklabels=xticklabels)
-        num_nonzero_classes = len([name for name, count_i in counts[k].items() if count_i > 0])
-        
-        title = f"{k} [n={len(v)}"
-        if num_nonzero_classes < num_classes:
-            title += f", num_classes@(count > 0) = {num_nonzero_classes}-out-of-{num_classes} classes in dataset"
-        title += "]"
-        plt.gca().set_title(title, fontsize='large')
-        
-        num_samples += len(v)
-    
-
-    
-    suptitle = '-'.join(list(data_splits.keys())) + f"_splits (total samples={num_samples}, total classes = {num_classes})"
-    
-    plt.suptitle(suptitle, fontsize='x-large')
-    plt.subplots_adjust(bottom=0.1, top=0.94, wspace=None, hspace=0.08)
-    
-    return fig, ax
-
-
-
-
-
-
-def plot_trainvaltest_splits(train_data,
-                             val_data,
-                             test_data):
-    """
-    Create 3 vertically-stacked count plots of train, val, and test dataset class label distributions
-    """
-    fig, ax = plt.subplots(3, 1, figsize=(16,8*3))
-
-    train_counts = plot_class_distributions(targets=train_data.targets, sort_by=True, ax = ax[0], xticklabels=False)
-    plt.gca().set_title(f"train (n={len(train_data)})", fontsize='large')
-    sort_classes = train_counts.keys()
-
-    val_counts = plot_class_distributions(targets=val_data.targets, ax = ax[1], sort_by=sort_classes, xticklabels=False)
-    plt.gca().set_title(f"val (n={len(val_data)})", fontsize='large')
-    test_counts = plot_class_distributions(targets=test_data.targets, ax = ax[2], sort_by=sort_classes)
-    plt.gca().set_title(f"test (n={len(test_data)})", fontsize='large')
-
-    num_samples = len(train_data) + len(val_data) + len(test_data)
-    
-    plt.suptitle(f"Train-Val-Test_splits (total={num_samples})", fontsize='x-large')
-
-    plt.subplots_adjust(bottom=0.1, top=0.95, wspace=None, hspace=0.07)
-    
-    return fig, ax
-
-
-
 #######################################################
 
 
-    
-    
-    
-def colorbar(mappable):
-    import matplotlib.pyplot as plt
-    from mpl_toolkits.axes_grid1 import make_axes_locatable
-    last_axes = plt.gca()
-    ax = mappable.axes
-    fig = ax.figure
-    divider = make_axes_locatable(ax)
-    cax = divider.append_axes("right", size="5%", pad=0.05)
-    cbar = fig.colorbar(mappable, cax=cax)
-    plt.sca(last_axes)
-    return cbar
-    
-    
 def rgb_loader(path):
     with open(path, 'rb') as f:
         with Image.open(f) as img:
@@ -1706,140 +1286,3 @@ def l_loader(path):
     
 #######################################
 #######################################
-
-
-    
-
-"save_config", "load_config", "export_image_data_diagnostics", "export_dataset_to_csv", "import_dataset_from_csv"
-
-
-
-
-
-
-
-def save_config(config: DictConfig, config_path: str):
-    with open(config_path, "w") as f:
-        f.write(OmegaConf.to_yaml(config, resolve=True))
-
-def load_config(config_path: str) -> DictConfig:    
-    with open(config_path, "r") as f:
-        loaded = OmegaConf.load(f)
-    return loaded
-
-
-def export_image_data_diagnostics(data_splits: Dict[str,CommonDataset],
-                                  output_dir: str='.',
-                                  max_samples: int = 64,
-                                  export_sample_images: bool=True,
-                                  export_class_distribution_plots: bool=True) -> Dict[str,str]:
-    image_paths = {"images": {},
-                   "class_distribution_plots":{}}
-    
-    image_dir = os.path.join(output_dir, "images")
-    plot_dir = os.path.join(output_dir, "plots")
-    os.makedirs(image_dir, exist_ok = True)
-    os.makedirs(plot_dir, exist_ok = True)
-
-    if export_sample_images:
-#         subsets = ['train', 'val', 'test']
-        for subset in data_splits.keys():
-            fig, ax = data_splits[subset].show_batch(indices=max_samples, include_colorbar=False,
-                                                     suptitle = f"subset: {subset}, {max_samples} random images")
-            img_path = os.path.join(image_dir, f"subset: {subset}, {max_samples} random images.jpg")
-            image_paths["images"][subset] = img_path
-            plt.savefig(img_path)
-
-    if export_class_distribution_plots:
-        fig, ax = plot_split_distributions(data_splits=data_splits)
-        class_distribution_plot_path = os.path.join(plot_dir, f"class_distribution_plots_{[subset for subset in data_splits.keys()]}")
-        image_paths["class_distribution_plots"]["all"] = class_distribution_plot_path
-        plt.savefig(class_distribution_plot_path)
-
-    return image_paths
-
-
-
-def export_dataset_to_csv(data_splits: Dict[str,CommonDataset],
-                          label_encoder: Optional[LabelEncoder]=None,
-                          datamodule_config: Optional[DictConfig]=None,
-                          output_dir: str='.',
-                          export_sample_images: bool=True,
-                          export_class_distribution_plots: bool=True) -> Dict[str,str]:
-    output_paths = {"tables":{},
-                    "class_labels":{},
-                    "configs":{}}
-    os.makedirs(output_dir, exist_ok=True)
-    for k, data in data_splits.items():
-        subset_data_path = os.path.join(output_dir, f"{k}_data_table.csv")
-        data.samples_df.to_csv(subset_data_path)
-        output_paths["tables"][k] = subset_data_path
-        
-        if hasattr(data, "config"):
-            subset_config_path = os.path.join(output_dir, f"{k}_dataset_config.yaml")
-            save_config(config=data.config, config_path=subset_config_path)
-            output_paths["configs"][k] = subset_config_path
-        
-        if hasattr(data, 'label_encoder') and (label_encoder is None):
-            subset_label_path = os.path.join(output_dir, k + "_label_encoder.json")
-            data.label_encoder.save(subset_label_path)
-            output_paths["class_labels"][k] = subset_data_path
-            
-    if label_encoder is not None:
-        full_label_encoder_path = os.path.join(output_dir, "label_encoder.json")
-        label_encoder.save(full_label_encoder_path)
-        output_paths["class_labels"]["full"] = full_label_encoder_path
-
-    
-    export_image_data_diagnostics(data_splits=data_splits,
-                                  output_dir=output_dir,
-                                  max_samples = 64,
-                                  export_sample_images=export_sample_images,
-                                  export_class_distribution_plots=export_class_distribution_plots)
-    
-    if isinstance(datamodule_config, DictConfig):
-        datamodule_config_dir = os.path.join(output_dir, "datamodule") 
-        os.makedirs(datamodule_config_dir, exist_ok=True)
-        datamodule_config_path = os.path.join(datamodule_config_dir, f"datamodule_config.yaml")
-        save_config(config=datamodule_config, config_path=datamodule_config_path)
-        output_paths["configs"]["datamodule"] = datamodule_config_path
-    
-    
-    return output_paths
-    
-
-def import_dataset_from_csv(data_catalog_dir: str) -> Tuple[Dict[str, CommonDataset], DictConfig]:
-    
-    data_paths = list(Path(data_catalog_dir).glob("*.csv"))
-    config_paths = list(Path(data_catalog_dir).glob("*.yaml"))
-    label_encoder_paths = list(Path(data_catalog_dir).glob("*.json"))
-    assert len(data_paths) == len(config_paths)
-    
-    datamodule_config_path = list(Path(data_catalog_dir, "datamodule").glob("*.yaml"))
-    input_paths = {"tables":{},
-                   "class_labels":{},
-                   "configs":{}}
-    subsets = ["train", "val", "test"]
-    for subset in subsets:
-        input_paths["tables"][subset] = [p for p in data_paths if p.stem.startswith(subset)][0]
-        input_paths["configs"][subset] = [p for p in config_paths if p.stem.startswith(subset)][0]
-    
-    if len(label_encoder_paths) == 1:
-        label_encoder = LabelEncoder.load(label_encoder_paths[0])
-    else:
-        raise(f'Currently cannot distinguish between multiple label_encoders, please delete all but 1 in experiment directory. Contents: {label_encoder_paths}')
-    
-    data_splits = {}
-    for subset in subsets:
-        sample_df = pd.read_csv(input_paths["tables"][subset])
-        config = load_config(input_paths["configs"][subset])
-        data_splits[subset] = CommonDataset.from_dataframe(sample_df,
-                                                           config=config)
-        data_splits[subset].label_encoder = label_encoder
-    
-    datamodule_config = None
-    if len(datamodule_config_path):
-        datamodule_config_path = datamodule_config_path[0]
-        datamodule_config = load_config(datamodule_config_path)
-        
-    return data_splits, datamodule_config

@@ -84,6 +84,8 @@ class LeavesdbBase:
 @dataclass
 class Leavesdbv0_3(LeavesdbBase):
 
+    PNAS_family_100_original: str = "/media/data_cifs/projects/prj_fossils/data/processed_data/data_splits/PNAS_family_100"
+    PNAS_family_4_original: str = "/media/data_cifs/projects/prj_fossils/data/processed_data/data_splits/PNAS_family_4"
     
     PNAS_family_100_512: str = "/media/data_cifs/projects/prj_fossils/data/processed_data/data_splits/PNAS_family_100_512"
     PNAS_family_100_1024: str = "/media/data_cifs/projects/prj_fossils/data/processed_data/data_splits/PNAS_family_100_1024"
@@ -148,9 +150,9 @@ class Leavesdbv0_3(LeavesdbBase):
 @dataclass
 class Leavesdbv1_0(LeavesdbBase):
 
-    Extant_family_original: str = "/media/data_cifs/projects/prj_fossils/data/processed_data/leavesdb-v1_0/images/Extant_Leaves/original/full/jpg"
-    General_Fossil_family_original: str = "/media/data_cifs/projects/prj_fossils/data/processed_data/leavesdb-v1_0/images/Fossil/General_Fossil/original/full/jpg"
-    Florissant_Fossil_family_original: str = "/media/data_cifs/projects/prj_fossils/data/processed_data/leavesdb-v1_0/images/Fossil/Florissant_Fossil/original/full/jpg"
+    Extant_Leaves_original: str = "/media/data_cifs/projects/prj_fossils/data/processed_data/leavesdb-v1_0/images/Extant_Leaves/original/full/jpg"
+    General_Fossil_original: str = "/media/data_cifs/projects/prj_fossils/data/processed_data/leavesdb-v1_0/images/Fossil/General_Fossil/original/full/jpg"
+    Florissant_Fossil_original: str = "/media/data_cifs/projects/prj_fossils/data/processed_data/leavesdb-v1_0/images/Fossil/Florissant_Fossil/original/full/jpg"
 
     
     PNAS_family_100_512: str = "/media/data_cifs/projects/prj_fossils/data/processed_data/data_splits/PNAS_family_100_512"
@@ -211,8 +213,8 @@ class Leavesdbv1_0(LeavesdbBase):
 
     def __post_init__(self):
         
-        self.Fossil_original: List[str] = [self.General_Fossil_family_original,
-                                           self.Florissant_Fossil_family_original]
+        self.Fossil_original: List[str] = [self.General_Fossil_original,
+                                           self.Florissant_Fossil_original]
 
         self.Fossil_512: List[str] = [self.General_Fossil_512,
                                       self.Florissant_Fossil_512]
@@ -279,7 +281,33 @@ class available_datasets:
         return out
     
     @classmethod
+    def query_tags(cls,
+                   dataset_name: str,
+                   threshold: Optional[int]=0,
+                   y_col: str="family", 
+                   resolution: Optional[Tuple[str, int]]="original") -> str:
+        tag = dataset_name
+        if int(threshold) > 0:
+            tag += f"_{y_col}_{threshold}"
+        tag += f"_{resolution}"
+        
+        try:
+            cls.get_latest(tag)
+        except KeyError as e:
+            print(f"KeyError: Invalid dataset query. {tag} doesn't exist")
+            print("tag: ", tag)
+        return tag
+#         if isinstance(resolution, int):
+            
+    
+    @classmethod
     def get_latest(cls, tag: str) -> Union[str, List[str]]:
+        """
+        Wrapper around available_datasets.get() that defaults to the latest dataset version containing the requested tag.
+        
+        Useful for datasets like PNAS, which havent changed since version 0_3.
+        
+        """
         if "PNAS" in tag:
             return cls.get(tag, version="v0_3")
         else:

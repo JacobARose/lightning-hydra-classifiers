@@ -13,9 +13,9 @@ Author: Jacob A Rose
 
 
 from .common import (display_images,
-                     filter_df_by_threshold,
-                     plot_class_distributions,
-                     plot_trainvaltest_splits)
+                     filter_df_by_threshold)
+#                      plot_class_distributions)
+#                      plot_trainvaltest_splits)
 #                      LeavesDataset, 
 # #                      LeavesLightningDataModule,
 #                      TrainValSplitDataset, 
@@ -391,10 +391,10 @@ class FossilDataset(torchdata.datasets.Files): #ImageDataset):
                                                 x_col = 'path',
                                                 y_col = "family")
         
-        if plot_distributions:
-            cls.plot_trainvaltest_splits(train_data,
-                                         val_data,
-                                         test_data)
+#         if plot_distributions:
+#             cls.plot_trainvaltest_splits(train_data,
+#                                          val_data,
+#                                          test_data)
 
         return train_data, val_data, test_data
     
