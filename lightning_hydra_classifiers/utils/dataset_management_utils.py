@@ -37,7 +37,10 @@ __all__ = ["save_config", "load_config",
            "Extract", "DataSplitter",
            "export_image_data_diagnostics", 
            "export_dataset_to_csv",
-           "import_dataset_from_csv"]
+           "import_dataset_from_csv",
+           "DatasetFilePathParser",
+           "parse_df_catalog_from_image_directory"
+]
 
 
 
@@ -130,7 +133,7 @@ class Extract:
         files = cls.locate_files(dataset_dir=root_dir,
                                  select_subset=select_subset)
         for k in list(files.keys()):
-            files[k] = pd.DataFrame(files[k]) #.samples)
+            files[k] = pd.DataFrame(files[k]).rename(columns={0:"path"}) #.samples)
         return files
     
     @classmethod
@@ -358,3 +361,115 @@ def import_dataset_from_csv(data_catalog_dir: str) -> Tuple[Dict[str, "CommonDat
         datamodule_config = load_config(datamodule_config_path)
         
     return data_splits, datamodule_config
+
+
+
+
+
+
+
+
+
+from torchvision.datasets import ImageFolder
+# def get_image_dataset(root_dir):
+#     """
+#     Simple wrapper around torchvision.datasets.ImageFolder
+#     """
+#     dataset = ImageFolder(root_dir)
+#     return dataset
+
+##################
+##################
+
+
+from typing import *
+import sys
+import argparse
+
+
+class DatasetFilePathParser:
+    
+#     def __init__(self, root_dir: str="/"):
+#         self.root_dir = root_dir
+    
+    @classmethod
+    def get_parser(cls, dataset_name: str) -> Dict[str, Callable]:
+        if "Extant_Leaves" in dataset_name:
+            return cls().ExtantLeavesParser
+        if "Fossil" in dataset_name:
+            return cls().FossilParser
+        if "PNAS" in dataset_name:
+            return cls().PNASParser
+    
+#     @property
+    @classmethod
+    def parse_dtypes(self, data: pd.DataFrame) -> pd.DataFrame:
+        return data.astype({
+                            "path": pd.StringDtype(),
+                            "family": pd.CategoricalDtype(),
+                            "genus": pd.CategoricalDtype(),
+                            "species": pd.CategoricalDtype(),
+                            "catalog_number": pd.StringDtype(),
+                            "relative_path": pd.StringDtype(),
+                            "root_dir": pd.CategoricalDtype()
+                           })
+    
+    @property
+    def ExtantLeavesParser(self):
+        return {
+                "family": lambda x, col: Path(x[col]).stem.split('_')[0],
+                "genus": lambda x, col: Path(x[col]).stem.split('_')[1],
+                "species": lambda x, col: Path(x[col]).stem.split('_')[2],
+                "catalog_number": lambda x, col: Path(x[col]).stem.split('_', maxsplit=4)[-1],
+                "relative_path": lambda x, col: str(Path(x[col]).relative_to(Path(x[col]).parent.parent)),
+                "root_dir": lambda x, col:  str(Path(x[col]).parent.parent)
+               }
+
+    @property
+    def FossilParser(self):
+        return {
+                "family": lambda x, col: Path(x[col]).stem.split('_')[0],
+                "genus": lambda x, col: Path(x[col]).stem.split('_')[1],
+                "species": lambda x, col: Path(x[col]).stem.split('_')[2],
+                "catalog_number": lambda x, col: Path(x[col]).stem.split('_', maxsplit=4)[-1],
+                "relative_path": lambda x, col: str(Path(x[col]).relative_to(Path(x[col]).parent.parent)),
+                "root_dir": lambda x, col:  str(Path(x[col]).parent.parent)
+               }
+
+
+    @property
+    def PNASParser(self):
+        return {
+                "family": lambda x, col: Path(x[col]).stem.split('_')[0],
+                "genus": lambda x, col: Path(x[col]).stem.split('_')[1],
+                "species": lambda x, col: Path(x[col]).stem.split('_')[2],
+                "catalog_number": lambda x, col: Path(x[col]).stem.split('_', maxsplit=3)[-1],
+                "relative_path": lambda x, col: str(Path(x[col]).relative_to(Path(x[col]).parent.parent)),
+                "root_dir": lambda x, col:  str(Path(x[col]).parent.parent)
+               }
+
+    
+    
+def parse_df_catalog_from_image_directory(root_dir: str, dataset_name: str="Extant_Leaves") -> pd.DataFrame:
+    """
+    Crawls root_dir and collects absolute paths of any images into a dataframe. Then, extracts
+    maximum available metadata from file paths (e.g. family, species labels in file name).
+    
+    Arguments:
+    
+        root_dir (str):
+            Location of the Imagenet-format organized image data on disk
+    Returns:
+        data_df (pd.DataFrame):
+            
+            
+    """
+    
+    parser = DatasetFilePathParser().get_parser(dataset_name)
+    data_df = Extract.df_from_dir(root_dir)['all']
+    for col, func in parser.items():
+        print(col)
+        data_df = data_df.assign(**{col:data_df.apply(lambda x: func(x, "path"), axis=1)})
+        
+    data_df = DatasetFilePathParser.parse_dtypes(data_df)
+    return data_df
