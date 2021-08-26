@@ -39,7 +39,9 @@ __all__ = ["save_config", "load_config",
            "export_dataset_to_csv",
            "import_dataset_from_csv",
            "DatasetFilePathParser",
-           "parse_df_catalog_from_image_directory"
+           "parse_df_catalog_from_image_directory",
+           "dataframe_difference",
+           "diff_dataset_catalogs"
 ]
 
 
@@ -455,6 +457,8 @@ def parse_df_catalog_from_image_directory(root_dir: str, dataset_name: str="Exta
     Crawls root_dir and collects absolute paths of any images into a dataframe. Then, extracts
     maximum available metadata from file paths (e.g. family, species labels in file name).
     
+    Metadata fields in each file path are specified by using a DatasetFilePathParser object.
+    
     Arguments:
     
         root_dir (str):
@@ -467,9 +471,68 @@ def parse_df_catalog_from_image_directory(root_dir: str, dataset_name: str="Exta
     
     parser = DatasetFilePathParser().get_parser(dataset_name)
     data_df = Extract.df_from_dir(root_dir)['all']
+    if data_df.shape[0] == 0:
+        print('Empty data catalog, skipping parsing step.')
+        return data_df
     for col, func in parser.items():
         print(col)
         data_df = data_df.assign(**{col:data_df.apply(lambda x: func(x, "path"), axis=1)})
         
     data_df = DatasetFilePathParser.parse_dtypes(data_df)
     return data_df
+
+
+
+
+def dataframe_difference(source_df: pd.DataFrame,
+                         target_df: pd.DataFrame,
+                         id_col: str="relative_path"):
+    """
+    Find rows which are different between two DataFrames.
+    
+    Example:
+    
+        shared, diff, source_only, target_only = dataframe_difference(source_df=data_df,
+                                                                      target_df=target_data_df,
+                                                                      id_col="relative_path")
+    """
+    
+    comparison_df = source_df.merge(target_df[id_col], how="outer", on=id_col, indicator=True)
+    
+    comparison_df = comparison_df.replace({"left_only":"source_only",
+                                           "right_only":"target_only"})
+
+    shared = comparison_df[comparison_df["_merge"]=="both"]
+    diff = comparison_df[comparison_df["_merge"]!="both"]
+    source_only = comparison_df[comparison_df["_merge"]=="source_only"]
+    target_only = comparison_df[comparison_df["_merge"]=="target_only"]
+    
+#     import pdb;pdb.set_trace()
+    
+    return shared, diff, source_only, target_only
+
+
+def diff_dataset_catalogs(source_catalog: pd.DataFrame,
+                          target_catalog: pd.DataFrame) -> Tuple[pd.DataFrame]:
+    """
+    Find the shared and unique rows between 2 dataframes based on the "relative_path" column.
+    """
+    
+    shared, diff, source_only, target_only = dataframe_difference(source_df=source_catalog,
+                                                                  target_df=target_catalog,
+                                                                  id_col="relative_path")    
+    
+
+    num_preexisting = sum([shared.shape[0] + target_only.shape[0]])
+    if num_preexisting > 0:
+        print(f"Found {num_preexisting} previously generated files in target location.")
+        print(f"""
+        shared: {shared.shape[0]}
+        diff: {diff.shape[0]}
+        source_only: {source_only.shape[0]}
+        target_only: {target_only.shape[0]}
+        """)
+    else:
+        print(f"No previously generated files found in target location.")
+        
+    return shared, diff, source_only, target_only

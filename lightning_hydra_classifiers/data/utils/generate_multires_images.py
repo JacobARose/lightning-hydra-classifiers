@@ -5,23 +5,27 @@
 
 The following command:
 
-python "/media/data_cifs/projects/prj_fossils/data/processed_data/leavesdb-v1_0/scripts/generate_images_multires_leavesdbv1_0.py" --run-all
+python "/media/data/jacob/GitHub/lightning-hydra-classifiers/lightning_hydra_classifiers/data/utils/generate_multires_images.py" --run-all
 
 
 
+# Run all 3 datasets for all 4 resolutions in serial
 
-python "/media/data_cifs/projects/prj_fossils/data/processed_data/leavesdb-v1_0/scripts/generate_images_multires_leavesdbv1_0.py" -d "/media/data_cifs/projects/prj_fossils/data/processed_data/leavesdb-v1_0/images" --run-all
+python "/media/data/jacob/GitHub/lightning-hydra-classifiers/lightning_hydra_classifiers/data/utils/generate_multires_images.py" --dataset_name "all" --run-all
 
 
-python "/media/data/jacob/GitHub/lightning-hydra-classifiers/lightning_hydra_classifiers/data/utils/generate_images_multires_leavesdbv1_0.py" --dataset_name Extant_Leaves --run-all
+# Run 1 dataset for all 4 resolutions in serial
 
-is equivalent to the following 4 cmdline statements:
+python "/media/data/jacob/GitHub/lightning-hydra-classifiers/lightning_hydra_classifiers/data/utils/generate_multires_images.py" --dataset_name Extant_Leaves --run-all -skip 512
 
-python "/media/data_cifs/projects/prj_fossils/data/processed_data/leavesdb-v1_0/scripts/generate_images_multires_leavesdbv1_0.py" --resolution=512
-python "/media/data_cifs/projects/prj_fossils/data/processed_data/leavesdb-v1_0/scripts/generate_images_multires_leavesdbv1_0.py" --resolution=1024
-python "/media/data_cifs/projects/prj_fossils/data/processed_data/leavesdb-v1_0/scripts/generate_images_multires_leavesdbv1_0.py" --resolution=1536
-python "/media/data_cifs/projects/prj_fossils/data/processed_data/leavesdb-v1_0/scripts/generate_images_multires_leavesdbv1_0.py" --resolution=2048
+is equivalent to the following 4 cmdline statements (Run in parallel):
 
+python "/media/data/jacob/GitHub/lightning-hydra-classifiers/lightning_hydra_classifiers/data/utils/generate_multires_images.py" --resolution=512 --dataset_name Extant_Leaves
+python "/media/data/jacob/GitHub/lightning-hydra-classifiers/lightning_hydra_classifiers/data/utils/generate_multires_images.py" --resolution=1024 --dataset_name Extant_Leaves
+python "/media/data/jacob/GitHub/lightning-hydra-classifiers/lightning_hydra_classifiers/data/utils/generate_multires_images.py" --resolution=1536 --dataset_name Extant_Leaves
+python "/media/data/jacob/GitHub/lightning-hydra-classifiers/lightning_hydra_classifiers/data/utils/generate_multires_images.py" --resolution=2048 --dataset_name Extant_Leaves
+
+Note: When launching in parallel from the cmdline, be mindful of specifying low enough num_workers.
 """
 
 
@@ -58,11 +62,14 @@ from torchvision import transforms
 from torchvision import utils
 import torchvision
 from torch import nn
-from lightning_hydra_classifiers.utils.ResizeRight.resize_right import resize_right, interp_methods
 from functools import partial
 import json
 from munch import Munch
 from pandarallel import pandarallel
+from lightning_hydra_classifiers.utils.ResizeRight.resize_right import resize_right, interp_methods
+from lightning_hydra_classifiers.utils.dataset_management_utils import DatasetFilePathParser, parse_df_catalog_from_image_directory, diff_dataset_catalogs
+from typing import *
+
 tqdm.pandas()
 
 plt.style.available
@@ -159,7 +166,7 @@ class CleverCrop:
                               antialiasing=self.antialiasing)
         self.normalize_image = NormalizeImage.normalize_image
         
-        print('CleverCrop.__init__() ->', repr(self))
+#         print('CleverCrop.__init__() ->', repr(self))
 
     
     @staticmethod
@@ -224,13 +231,6 @@ class CleverCrop:
         "grayscale":self.grayscale,
         "normalize":self.normalize})
 
-    
-
-
-
-from lightning_hydra_classifiers.utils.dataset_management_utils import DatasetFilePathParser, parse_df_catalog_from_image_directory
-from typing import *
-# from skimage import io
 
 clever_crop = CleverCrop()
 
@@ -319,8 +319,39 @@ import sys
 import argparse
 from lightning_hydra_classifiers.data.utils.catalog_registry import *
 
-def query_and_preprocess_catalog(config,
-                                 target_config):
+# def query_and_preprocess_source_and_target_catalog(config,
+#                                                    target_config):
+#     tag = available_datasets.query_tags(dataset_name=config.dataset_name,
+#                                         y_col=config.y_col,
+#                                         threshold=config.threshold,
+#                                         resolution=config.resolution)
+#     root_dir = available_datasets.get_latest(tag)
+#     print(f"Tag: {tag}")
+#     print(f"Root Dir: {root_dir}")
+#     data_df = parse_df_catalog_from_image_directory(root_dir=root_dir, dataset_name=config.dataset_name)
+
+#     target_dir = root_dir.replace("original", f"{target_config.resolution}")
+#     data_df = data_df.assign(target_path = data_df.apply(lambda x: str(Path(target_dir, x.family, Path(x.path).name)), axis=1))
+#     family_dirs = list(set(data_df.target_path.apply(lambda x: str(Path(x).parent))))
+#     [os.makedirs(subdir, exist_ok=True) for subdir in family_dirs];
+    
+#     return data_df
+
+
+
+
+
+def query_and_preprocess_catalog(config):
+    """
+    
+    Arguments:
+        config (NameSpace):
+            ::dataset_name
+            ::y_col
+            ::threshold
+            ::resolution
+    
+    """
     tag = available_datasets.query_tags(dataset_name=config.dataset_name,
                                         y_col=config.y_col,
                                         threshold=config.threshold,
@@ -328,19 +359,95 @@ def query_and_preprocess_catalog(config,
     root_dir = available_datasets.get_latest(tag)
     print(f"Tag: {tag}")
     print(f"Root Dir: {root_dir}")
+    if not os.path.isdir(root_dir):
+        print("[INFO] There is not yet any directory located at: {root_dir}. Skipping dataset validation.")
+        return pd.DataFrame(), root_dir
     data_df = parse_df_catalog_from_image_directory(root_dir=root_dir, dataset_name=config.dataset_name)
 
-    target_dir = root_dir.replace("original", f"{target_config.resolution}")
-    data_df = data_df.assign(target_path = data_df.apply(lambda x: str(Path(target_dir, x.family, Path(x.path).name)), axis=1))
+    return data_df, root_dir
+
+
+def preprocess_target_catalog(data_df: pd.DataFrame, 
+                              config,
+                              source_dir: str) -> pd.DataFrame:
+    """
+    
+    Arguments:
+        config (NameSpace):
+            ::dataset_name
+            ::y_col
+            ::threshold
+            ::resolution
+    
+    """
+#     import pdb;pdb.set_trace()
+    target_dir = source_dir.replace("original", f"{config.resolution}")
+    
+    target_path = None    
+    if data_df.shape[0] > 0:
+        target_path = data_df.apply(lambda x: str(Path(target_dir, x.family, Path(x.path).name)), axis=1)
+    data_df = data_df.assign(target_path=target_path)
     family_dirs = list(set(data_df.target_path.apply(lambda x: str(Path(x).parent))))
     [os.makedirs(subdir, exist_ok=True) for subdir in family_dirs];
+
+    return data_df
+
+
+
+# def query_and_preprocess_source_and_target_catalog(config,
+#                                                    target_config):
+    
+#     data_df, root_dir = query_and_preprocess_catalog(config)
+#     data_df = preprocess_target_catalog(data_df=data_df, config=target_config, source_dir=root_dir)
+    
+#     return data_df
+
+
+def warm_start_catalogs(config,
+                        target_config,
+                        save_report: bool=False) -> pd.DataFrame:
+    """ Save time by skipping previously processed files and keeping only the yet-to-be processed catalog.
+    
+    Query and Preprocess catalogs from source and target configs,
+    return only the rows that are unique to the source location,
+    then format the remainder in preparation to run the multi-res image generation script (i.e. source_path -> "path", target_path -> "target_path" columns)
+    
+    """
+    source_catalog, source_dir = query_and_preprocess_catalog(config)
+    target_catalog, target_dir = query_and_preprocess_catalog(target_config)
+#     import pdb; pdb.set_trace()
+    if target_catalog.shape[0] == 0:
+        data_df = source_catalog
+    else:
+        shared, diff, source_only, target_only = diff_dataset_catalogs(source_catalog=source_catalog,
+                                                                       target_catalog=target_catalog)
+        data_df = source_only
+
+        if save_report is not None:
+            report_dir = Path(target_dir).parent / "audit_logs"
+            os.makedirs(report_dir, exist_ok=True)
+            shared.to_csv(Path(report_dir, "shared_catalog.csv"))
+            diff.to_csv(Path(report_dir, "diff_catalog.csv"))
+            print(f"Exported catalog validation logs to directory: {report_dir}")
+            print(f"Contents:")
+            pp(os.listdir(report_dir))
+
+    
+    data_df = preprocess_target_catalog(data_df=data_df, config=target_config, source_dir=source_dir)
     
     return data_df
 
 
 
 
+
 def setup_configs(args):
+    """
+    args:
+        ::dataset_name
+        ::resolution
+    
+    """
     print('args:', vars(args))
     print(args.resolution)
     config = Munch(dataset_name = args.dataset_name,
@@ -358,42 +465,49 @@ def setup_configs(args):
 
 
 
-        
-        
-#     p.add_argument("-d", "--root_dir", dest="root_dir", type=str,
-#                    default="/media/data_cifs/projects/prj_fossils/data/processed_data/leavesdb-v1_0/images",
-#                    help="""Destination image root dir. Script will expect source images to exist in class-wise subdirs in "./{dataset}/original/full/jpg". Then, for creating the target images
-#                    it will create subdirs "./{dataset}/{res}/full/jpg" for user-input resolution value.""")
 
 
-def cmdline_args():
-    p = argparse.ArgumentParser(description="Resize datasets to a new resolution, using the clever crop resize function. Requires source images to exist in {root_dir}/original/jpg and be organized into 1 subdir per-class.")
-    p.add_argument("-r", "--resolution", dest="resolution", type=int,
-                   help="target resolution, images resized to (3, res, res).")
-    p.add_argument("-n", "--dataset_name", dest="dataset_name", type=str,
-                   default="Extant_Leaves",
-                   help="""Base dataset_name to be used to query the source root_dir.""")
-    p.add_argument("-a", "--run-all", dest="run_all", action="store_true",
-                   help="Flag for when user would like to run through all default resolution arguments on a given dataset. Currently includes resolutions = [512, 1024, 1536, 2048].")
-    p.add_argument("--num_workers", dest="num_workers", type=int, default=8)
-    return p.parse_args()
+def validate_dataset(args, save_report: bool=False) -> bool:
+    """
+    Compare source & target datasets, optionally save comparison report to csv files, and return True only if they are identical.
+    
+    Return:
+        (bool)
+    """
+    
+    config, target_config = setup_configs(args)
+    data_df = warm_start_catalogs(config,
+                                  target_config,
+                                  save_report=save_report)
+    return data_df.shape[0]==0
 
+
+def process(args):
+
+    config, target_config = setup_configs(args)
+    data_df = warm_start_catalogs(config,
+                                  target_config,
+                                  save_report=args.save_report)
+    if data_df.shape[0] == 0:
+        print(f'[SKIPPING PROCESS] Warm start skipping previously generated dataset: {args.dataset_name} at resolution: {args.resolution} ')
+        return
+
+
+    pp(target_config)
+    resize_and_resave_dataset_parallel(data=data_df,
+                                       resolution=target_config.resolution,
+                                       parallel=True)
+
+            
+#########################################
+#########################################
 
 
 def main(args):
     
-    
-    if args.dataset_name == "all":
-        dataset_names = ["Extant_Leaves", "Florissant_Fossil", "General_Fossil"]
-    else:
-        dataset_names = [args.dataset_name]
-        
-    if args.run_all:
-        resolutions = [512, 1024, 1536, 2048]
-    else:
-        resolutions = [args.resolution]
-        
-        
+    dataset_names = args.dataset_name
+    resolutions = args.resolution
+
     print(f'[INITIATING] Multi-resolution dataset creation')
     print(f'Datasets: {dataset_names}')
     print(f"Resolutions: {resolutions}")
@@ -404,27 +518,66 @@ def main(args):
         for res in resolutions:
             args.dataset_name = dataset_name
             args.resolution = res
-        
-            config, target_config = setup_configs(args)
-            data_df = query_and_preprocess_catalog(config,
-                                                   target_config)
-
-            print(f"Trial #{i}/{num_trials}")
-            pp(target_config)
-            resize_and_resave_dataset_parallel(data=data_df,
-                                               resolution=target_config.resolution,
-                                               parallel=True)
+            print(f"Trial #{i}/{num_trials-1}")
+            
+            if args.validate_only:
+                print("[RUNNING] Dataset validation only.")
+                validate_dataset(args, save_report=args.save_report)
+                i+=1
+                continue
+            print("[RUNNING] Dataset generation.")
+            print(f"[ARGS] dataset_name: {args.dataset_name}, resolution: {args.resolution}")
+            
+            process(args)
             i+=1
+            
 
+
+
+#########################################
+#########################################
+
+
+def cmdline_args():
+    p = argparse.ArgumentParser(description="Resize datasets to a new resolution, using the clever crop resize function. Requires source images to exist in {root_dir}/original/jpg and be organized into 1 subdir per-class.")
+    p.add_argument("-r", "--resolution", dest="resolution", type=int, nargs="*",
+                   help="target resolution, images resized to (3, res, res).")
+    p.add_argument("-n", "--dataset_name", dest="dataset_name", type=str, nargs="*", default="Extant_Leaves",
+                   help="""Base dataset_name to be used to query the source root_dir.""")
+    p.add_argument("-a", "--run-all", dest="run_all", action="store_true",
+                   help="Flag for when user would like to run through all default resolution arguments on a given dataset. Currently includes resolutions = [512, 1024, 1536, 2048].")
+    p.add_argument("-skip", dest="skip", nargs="*", type=int, default=[],
+                   help="Explicitly skip any provided dataset resolutions.")
+    p.add_argument("--validate_only", dest="validate_only", action="store_true", default=False,
+                   help="Flag for when user would like to only validate datasets without launching any of the multi-res processing stages..")
+    p.add_argument("--save_report", dest="save_report", action="store_true", default=False,
+                   help="Flag for when user would like to save csv files from the validation report.")
+    p.add_argument("--num_workers", dest="num_workers", type=int, default=15)    
+    args = p.parse_args()
     
+
+    print(args)
+    if args.dataset_name == "all":
+        args.dataset_name = ["Extant_Leaves", "Florissant_Fossil", "General_Fossil"]
+    if args.run_all:
+        args.resolution = [512, 1024, 1536, 2048]
+    args.skip = list(set(args.skip).intersection(set(args.resolution)))
+    if len(args.skip) > 0:
+        print(f'Skipping resolutions {args.skip}')
+        args.resolution = sorted(list(set(args.resolution) - set(args.skip)))
+    
+    return args
+
+
+
+
 
 if __name__ == "__main__":
 
     args = cmdline_args()
     
     num_workers = args.num_workers    
-    pandarallel.initialize(nb_workers=num_workers, progress_bar=True)
-    
+    pandarallel.initialize(nb_workers=num_workers, progress_bar=True)    
 
     main(args)
 
