@@ -1,4 +1,4 @@
-from . import callbacks, datamodules, models, utils, experiments, scripts
+from . import callbacks, models, utils, experiments, scripts
 from .scripts import *
 
 from . import data
