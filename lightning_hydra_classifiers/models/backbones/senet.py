@@ -17,6 +17,10 @@ from collections import OrderedDict
 
 import torch.nn as nn
 from torch.utils import model_zoo
+from typing import Union
+from .. import BaseModule
+
+
 
 __all__ = [
     "SENet",
@@ -213,7 +217,7 @@ class SEResNeXtBottleneck(Bottleneck):
         self.stride = stride
 
 
-class SENet(nn.Module):
+class SENet(BaseModule):
     def __init__(
         self,
         block,
@@ -384,6 +388,12 @@ class SENet(nn.Module):
         return x
 
 
+
+
+
+
+
+
 def initialize_pretrained_model(model, num_classes, settings):
     assert num_classes == settings["num_classes"], "num_classes should be {}, but is {}".format(
         settings["num_classes"], num_classes
@@ -497,3 +507,36 @@ def se_resnext101_32x4d(num_classes=1000, pretrained="imagenet"):
         settings = pretrained_settings["se_resnext101_32x4d"][pretrained]
         initialize_pretrained_model(model, num_classes, settings)
     return model
+
+
+
+
+##################################
+##################################
+
+
+
+def save_model(model, path: str):
+    settings = {}
+    settings["model_state_dict"] = model.state_dict()
+    settings["input_space"] = model.input_space
+    settings["input_size"] = model.input_size
+    settings["input_range"] = model.input_range
+    settings["mean"] = model.mean
+    settings["std"] = model.std
+    model.save_checkpoint(settings, path)
+
+
+
+AVAILABLE_MODELS = ['senet154', 'se_resnet50', 'se_resnet101', 'se_resnet152', 'se_resnext50_32x4d', 'se_resnext101_32x4d']
+
+def build_model(model_name: str,
+                pretrained: Union[str, bool]=False,
+                progress: bool=True,
+                **kwargs) -> nn.Module:
+    assert model_name in AVAILABLE_MODELS, f'[ERROR] Please only choose from available models: {AVAILABLE_MODELS}'    
+    model_func = globals()[model_name]
+    if pretrained == True:
+        pretrained = "imagenet"
+        
+    return model_func(pretrained=pretrained, **kwargs)

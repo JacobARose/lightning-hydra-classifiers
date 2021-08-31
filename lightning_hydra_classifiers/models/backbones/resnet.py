@@ -23,7 +23,7 @@ from torchvision import models
 from torchvision.models.utils import load_state_dict_from_url
 from torchvision.models.resnet import BasicBlock, Bottleneck, model_urls
 import copy
-
+from typing import Union
 from .. import BaseModule
 
 
@@ -224,18 +224,33 @@ AVAILABLE_MODELS = ['resnet18', 'resnet34', 'resnet50', 'resnet101',
                     'wide_resnet50_2', 'wide_resnet101_2']
 
 def build_model(model_name: str,
-                pretrained: bool=False,
+                pretrained: Union[str, bool]=False,
                 progress: bool=True,
                 **kwargs) -> nn.Module:
-    assert model_name in AVAILABLE_MODELS, f'[ERROR] Please only choose from available models: {AVAILABLE_MODELS}'
-    
+    assert model_name in AVAILABLE_MODELS, f'[ERROR] Please only choose from available models: {AVAILABLE_MODELS}'    
     model_func = globals()[model_name]
-    
+    if pretrained == True:
+        pretrained = "imagenet"
+        
     return model_func(pretrained=pretrained, progress=progress, **kwargs)
 
 
 
+# class ResnetClassifier(BaseModule):
+#     def __init__(self,
+#                  model_name='resnet18',
+#                  num_classes: int,                 
+#                  pretrained=False):
+#         super().__init__()
+#         self.num_classes = num_classes
+# #         self.model = timm.create_model(model_name, pretrained=pretrained)
+# #         self.in_features = self.model.get_classifier().in_features
+#         self.model = build_model(model_name, pretrained, progress)
+#         self.model.fc = nn.Linear(self.in_features, self.num_classes)
 
+#     def forward(self, x):
+#         x = self.model(x)
+#         return x
 
 
 
