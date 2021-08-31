@@ -1,3 +1,14 @@
+"""
+lightning_hydra_classifiers/experiments/transfer_experiments.py
+
+
+
+Created on: Sunday, August 30th, 2021
+Author: Jacob A Rose
+
+
+"""
+
 
 import argparse
 from munch import Munch
