@@ -1,6 +1,6 @@
 """
 
-create_multi-threshold_datasets_symlink_trees.py
+generate_multithresh_symlink_trees.py
 
 Created On: Wednesday Aug 11th, 2021
 Created By: Jacob A Rose
@@ -8,7 +8,7 @@ Created By: Jacob A Rose
 Summary: This script takes a source dataset of images organized into class-wise subdirs, and produces a set of symlink trees linking to it, each one containing only the classes that have at least as many images as that version's threshold.
 
 
-python "/media/data_cifs/projects/prj_fossils/data/processed_data/leavesdb-v1_0/scripts/create_multi-threshold_datasets_symlink_trees.py" --dry-run -a
+python "/media/data/jacob/GitHub/lightning-hydra-classifiers/lightning_hydra_classifiers/data/utils/generate_multithresh_symlink_trees.py" --dry-run -a
 
 """
 import argparse
@@ -33,7 +33,7 @@ from rich import print as pp
 import contextlib
 import io
 from pandarallel import pandarallel
-
+import time
 
 tqdm.pandas()
 
@@ -276,20 +276,24 @@ def filter_rare_classes_and_create_symlinks(data: pd.DataFrame,
     print("="*25)
     return symlink_data_catalog
 
-
+# python "/media/data/jacob/GitHub/lightning-hydra-classifiers/lightning_hydra_classifiers/data/utils/generate_multithresh_symlink_trees.py" --dry-run --resolution 512 1024 1536 2048 --dataset_name General_Fossil Florissant_Fossil --num_workers 8
 
 
         
 def cmdline_args(args=""):
-    p = argparse.ArgumentParser(description="Produce symlink trees from source dataset.")
-    p.add_argument("-data", "--datasets", dest="datasets", type=str, nargs="+",
+    p = argparse.ArgumentParser(description="Produce symlink trees from source dataset, or clean them up.")
+    p.add_argument("-t", "--task", dest="task", type=str, choices=["create", "clean"], default="create",
+                   help="Specify whether to create or clean (unlink) symlink trees according to the query produced by the other cmdline args.")
+    p.add_argument("-data", "--dataset_name", dest="dataset_name", type=str, nargs="+", choices=['Extant_Leaves', 'Florissant_Fossil', 'General_Fossil'],
                    help="Which dataset names to produce multiple threshold versions of. Currently available: ['Extant_Leaves', 'Florissant_Fossil', 'General_Fossil']")
+    p.add_argument("-r", "--resolution", dest="resolution", type=int, nargs="*", default=512,
+                   help="Resolution(s) to build symlinks from, images should be resized to (3, res, res).")
     p.add_argument("-d", "--root_dir", dest="root_dir", type=str,
                    default="/media/data_cifs/projects/prj_fossils/data/processed_data/leavesdb-v1_0/images",
                    help="""Destination image root dir. Script will expect source images to exist in class-wise subdirs in ".{dataset_name}/original/full/jpg". Then, for creating the target images
-                   it will create subdirs "./original/{threshold}/jpg" for user-input threshold value.""")
+                   it will create subdirs ".{dataset_name}/{resolution}/{threshold}/jpg" for user-input threshold value.""")
     p.add_argument("-a", "--run-all", dest="run_all", action="store_true",
-                   help="Overrides any values provided to --datasets. Flag for when user would like to run through all default threshold arguments on all datasets. Currently available: ['Extant_Leaves', 'Florissant_Fossil', 'General_Fossil'].")
+                   help="Overrides any values provided to --dataset_name. Flag for when user would like to run through all default threshold arguments on all datasets. Currently available: ['Extant_Leaves', 'Florissant_Fossil', 'General_Fossil'].")
     p.add_argument("--num_workers", dest="num_workers", type=int, default=16,
                    help="Number of parallel processes to be used by pandas to efficiently construct symlinks.")
     p.add_argument("--dry-run", dest="dry_run", action="store_true",
@@ -297,7 +301,8 @@ def cmdline_args(args=""):
     args = p.parse_args(args)
     
     if args.run_all:
-        args.datasets = ['Extant_Leaves', 'Florissant_Fossil', 'General_Fossil']
+        args.resolution = [512, 1024, 1536, 2048]
+        args.dataset_name = ['Extant_Leaves', 'Florissant_Fossil', 'General_Fossil']
         print('[RUNNING ALL DATASETS]')
     return args
 
@@ -309,25 +314,22 @@ def cmdline_args(args=""):
 
 if __name__ == "__main__":
     
-    args = cmdline_args(sys.argv[1:])
-    
+    args = cmdline_args(sys.argv[1:])    
     image_root_dir = Path(args.root_dir)
-    num_workers = args.num_workers
-    
-    pandarallel.initialize(nb_workers=num_workers, progress_bar=True)
-    
-    datasets = args.datasets
-    
-    resolutions = ["original", 512, 1024, 1536, 2048]
+    dataset_names = args.dataset_name
+    resolutions = args.resolution
+#     if args.run_all:
+#         args.resolution = ["original", 512, 1024, 1536, 2048]
+#         args.dataset_name = ['Extant_Leaves', 'Florissant_Fossil', 'General_Fossil']
     subdirs = {
                "Extant_Leaves": "Extant_Leaves",
                "Florissant_Fossil": str(Path("Fossil", "Florissant_Fossil")),
                "General_Fossil": str(Path("Fossil", "General_Fossil"))
               }
     dataset_thresholds = {
-               "Extant_Leaves": [10, 20, 50, 100],
-               "Florissant_Fossil": [3, 10, 50],
-               "General_Fossil": [3, 10, 50]
+               "Extant_Leaves": [3, 10, 20, 50, 100],
+               "Florissant_Fossil": [3, 10, 20, 50],
+               "General_Fossil": [3, 10, 20, 50]
               }
     y_col = "family"
     seed = 3546
@@ -337,7 +339,7 @@ if __name__ == "__main__":
     dataset_root_dirs = {}
     dataset_root_dirs_flat = {}
 
-    for name in datasets:
+    for name in dataset_names:
         dataset_root_dirs[name] = {} # str(image_root_dir / subdirs[name])
         for resolution in resolutions:
             dataset_root_dirs[name][resolution] = {}
@@ -352,25 +354,32 @@ if __name__ == "__main__":
         exit(0)
 
 
+    num_workers = args.num_workers
+    pandarallel.initialize(nb_workers=num_workers, progress_bar=True)        
+        
     ## Define subdirs for each source dataset in its original resolution and "full" class listing (i.e. threshold=0)
     ## Load each of these source datasets using torchvision.datasets.ImageFolder
     full_root_dirs = {}
     source_datasets = {}
-    for name in datasets:
-#         full_root_dirs[name] = str(image_root_dir / str(resolution) / str(threshold) / "jpg" / subdirs[name])
-        full_root_dirs[name] = str(image_root_dir / subdirs[name] / "original" / "full" / "jpg")
-        source_datasets[name] = torchvision.datasets.ImageFolder(full_root_dirs[name])
+    for name in dataset_names:
+        source_datasets[name] = {}
+        full_root_dirs[name] = {}
+        for resolution in resolutions:
+            full_root_dirs[name][resolution] = str(image_root_dir / subdirs[name] / str(resolution) / "full" / "jpg")
+#         full_root_dirs[name] = str(image_root_dir / subdirs[name] / "original" / "full" / "jpg")
+            source_datasets[name][resolution] = torchvision.datasets.ImageFolder(full_root_dirs[name][resolution])
 
 
-    print(f"Producing {len(dataset_root_dirs_flat)} unique configurations for symlink trees, across datasets: {datasets}")
+    print(f"Producing {len(dataset_root_dirs_flat)} unique configurations for symlink trees, across datasets: {dataset_names}")
     class Config:
         pass
 
     
-    resolutions = [512, 1024, 1536, 2048]
+#     resolutions = args.resolution #[512, 1024, 1536, 2048]
+    i = 0
     skip_symlinks = False #True
     symlink_data_catalogs = {}
-    for dataset_name in datasets:
+    for dataset_name in dataset_names:
         symlink_data_catalogs[dataset_name] = {}
         for resolution in resolutions:
             symlink_data_catalogs[dataset_name][resolution] = {}
@@ -383,18 +392,27 @@ if __name__ == "__main__":
                 cfg.seed = seed
                 cfg.y_col = y_col 
 
-                data = source_datasets[cfg.dataset_name]
+                data = source_datasets[cfg.dataset_name][cfg.resolution]
                 data_catalog = dataset2catalog(root_dir=None,
                                                dataset=data)
-
-                print(f'Creating thresholds: {dataset_thresholds[cfg.dataset_name]}')
                 target_dir = dataset_root_dirs[cfg.dataset_name][cfg.resolution][cfg.threshold]
-                symlink_data_catalogs[cfg.dataset_name][cfg.resolution][cfg.threshold] = filter_rare_classes_and_create_symlinks(data=data_catalog,
-                                                                                                                                 target_dir=target_dir,
-                                                                                                                                 y_col=cfg.y_col,
-                                                                                                                                 threshold=cfg.threshold,
-                                                                                                                                 skip_symlinks=skip_symlinks
-                                                                                                                                 )
+                
+                if args.task == "clean":
+                    if os.path.isdir(target_dir):
+                        print(f'[CLEANING] - [{time.ctime()}] - {i} - dataset: {dataset_name} - resolution: {resolution} - threshold: {threshold}')
+                        print("\t\t - " + f"target_dir: {target_dir.rstrip('jpg')}")
+                        shutil.rmtree(target_dir.rstrip('jpg'))
+                        
+                elif args.task == "create":
+                    print(f'[CREATING] - [{time.ctime()}] - {i} - dataset: {dataset_name} - resolution: {resolution} - threshold: {threshold}')
+                    symlink_data_catalogs[cfg.dataset_name][cfg.resolution][cfg.threshold] = filter_rare_classes_and_create_symlinks(data=data_catalog,
+                                                                                                                                     target_dir=target_dir,
+                                                                                                                                     y_col=cfg.y_col,
+                                                                                                                                     threshold=cfg.threshold,
+                                                                                                                                     skip_symlinks=skip_symlinks
+                                                                                                                                     )
+                i+=1
+            print(f'[FINISHED] - [{time.ctime()}] - {i} - dataset: {dataset_name} - resolution: {resolution} - thresholds: {dataset_thresholds[dataset_name]}')
 
     mode='w'
     if os.path.isfile(Path(image_root_dir, "Dataset summary.txt")):
@@ -403,6 +421,8 @@ if __name__ == "__main__":
     with contextlib.redirect_stdout(f):
         print("="*60)
         print()
+        print(f"Last task: {args.task}")
+        print(f"Time: {time.ctime()}")
         print(f'root_dir: {image_root_dir}')
         for dataset_name,v in symlink_data_catalogs.items():
             print("="*30)
@@ -412,7 +432,11 @@ if __name__ == "__main__":
                 for threshold_i, v_ii in v_i.items():
                     print(f"Threshold: {threshold_i} -- {v_ii.shape[0]} Samples")
                     print(f"Path: {dataset_root_dirs[dataset_name][resolution][threshold_i]}")
-
+                    if os.path.exists(dataset_root_dirs[dataset_name][resolution][threshold_i]) and \
+                        len(os.listdir(dataset_root_dirs[dataset_name][resolution][threshold_i])):
+                        print("Status: Exists")
+                    else:
+                        print("Status: Cleaned")
 
     f.close()
 

@@ -49,6 +49,7 @@ from pathlib import Path
 import random
 from rich import print as pp
 import matplotlib.pyplot as plt
+import time
 seed = 334455
 
 
@@ -525,10 +526,13 @@ def main(args):
                 validate_dataset(args, save_report=args.save_report)
                 i+=1
                 continue
-            print("[RUNNING] Dataset generation.")
+            print("[RUNNING DATASET PROCESSING].", f": ({time.strftime('%H:%M%p %Z on %b %d, %Y')})")
             print(f"[ARGS] dataset_name: {args.dataset_name}, resolution: {args.resolution}")
             
             process(args)
+            print(f"[FINISHED PROCESSING]", f": ({time.strftime('%H:%M%p %Z on %b %d, %Y')})")
+            print("[RUNNING POST-PROCESSING DATA VALIDATION]")
+            validate_dataset(args, save_report=args.save_report)
             i+=1
             
 

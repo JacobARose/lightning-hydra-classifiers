@@ -140,12 +140,12 @@ class BaseModule(nn.Module):
             if f"{state_dict}_state_dict" in checkpoint and part is not None:
                 part.load_state_dict(checkpoint[f"{state_dict}_state_dict"])
 
-    @classmethod
-    def save_checkpoint(self, checkpoint, path):
+    @staticmethod
+    def save_checkpoint(checkpoint, path):
         torch.save(checkpoint, path)
 
-    @classmethod
-    def load_checkpoint(self, path):
+    @staticmethod
+    def load_checkpoint(path):
         checkpoint = torch.load(path, map_location=lambda storage, loc: storage)
         return checkpoint
     
@@ -313,65 +313,6 @@ class BaseLightningModule(pl.LightningModule):
         return outputs
 
 
-
-#     def validation_epoch_end(self, validation_step_outputs):
-        
-#         local_rank = os.environ.get("LOCAL_RANK", 0)
-#         print(f'local_rank={local_rank}')
-#         if str(local_rank)!="0":
-#             print(f'Skipping val/confusion matrix logging on local_rank={local_rank}')
-#             return None
-        
-#         y_prob, y = [], []
-#         for batch in validation_step_outputs:
-#             y_prob.extend(batch['y_prob'].cpu().numpy())
-#             y.extend(batch['y_true'].cpu().numpy())
-            
-        
-#         y_prob=np.stack(y_prob)
-#         y=np.stack(y)
-        
-#         logger = get_wandb_logger(self.trainer)
-#         experiment = logger.experiment
-
-#         if experiment:
-#             print(y_prob[0].shape)
-#             experiment.log({"val/confusion_matrix" : wandb.plot.confusion_matrix(probs=y_prob, #np.concatenate(y_prob,axis=0),
-#                                                                                  y_true=y, #np.stack(y),
-#                                                                                  class_names=self.classes,
-#                                                                                  title="val/confusion_matrix")})#,
-
-
-
-
-
-
-#             else:
-
-#                             "global_step": self.trainer.global_step},
-#                            commit=False)
-        
-#         f1 = self.metrics_val_per_class['val/F1'].compute()
-#         cm = self.metrics_val_per_class['val/ConfusionMatrix'].compute()
-        
-#         class_names = list(range(len(f1)))
-#         if hasattr(self, "classes"):
-#             class_names = self.classes
-#         assert isinstance(class_names, list)
-        
-        
-#         logger = get_wandb_logger(trainer)
-#         experiment = logger.experiment
-        
-        
-#         table = wandb.Table(columns=class_names)
-        
-#         for k,v in validation_step_outputs.items():
-#             v["log"][]
-        
-#         self.metrics_val_per_class.reset()
-        
-    
     def test_step(self, batch, batch_idx):
         x, y = batch[:2]
         y_hat = self(x)
@@ -399,7 +340,6 @@ class BaseLightningModule(pl.LightningModule):
 #         print("y_hat.dtype=", y_hat.dtype)
         y_prob = self.probs(y_hat.float())
         y_pred = torch.max(y_prob, dim=1)[1]
-        
         
         self.metrics_test(y_prob, y)
         self.metrics_test_per_class(y_prob, y)
@@ -537,39 +477,7 @@ class BaseLightningModule(pl.LightningModule):
 #         )
 #         return loss
 
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
+
     
     
     

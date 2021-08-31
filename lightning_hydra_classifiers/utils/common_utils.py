@@ -29,42 +29,61 @@ __all__ = ["LabelEncoder", "trainval_split", "trainvaltest_split", "plot_split_d
            "filter_df_by_threshold", "compute_class_counts"]
 
 
-
 class LabelEncoder(object):
+    """
+    Label encoder for tag labels.
     
-    """Label encoder for tag labels."""
+    len(idx2class) <= len(class2idx)
+    num_classes == len(idx2class) <= len(class2idx)
+    """
     def __init__(self,
                  class2idx: Dict[str,int]=None,
-                 replace: Optional[Dict[str,str]]=None):
+                 replacements: Optional[Dict[str,str]]=None):
         self.class2idx = class2idx or {}
-        self.replace = replace or {}
-        self.index2class = {v: k for k, v in self.class2idx.items()}
-        self.classes = [k for k in self.class2idx.keys() if k not in self.replace.keys()]
-        
-        self.replace_class2idx_items()
+        self.replacements = replacements or {}
+        assert len(self.classes) == len(self.idx2class) <= len(self.class2idx)
         self.num_samples = 0
+        self.verbose=False
+#         self.replace_class2idx_items()
+        
 
+    @property
+    def idx2class(self):
+        return {v: k for k, v in self.class2idx.items() if k not in self.replacements.keys()}
+    
+    @property
+    def classes(self):
+        return [k for k in self.class2idx.keys() if k not in self.replacements.keys()]
+    
+#     def replace_class2idx_items(self):
+#         """
+#         Update inplace self.class2idx mappings, so that any class labels in self.replacements.keys()
+#         map to the same int label as their corresponding value in self.replacements.values().
         
-    def replace_class2idx_items(self):
-        if (len(self.replace) == 0) \
-        or (len([k for k in self.replace.keys() if k in self.class2idx.keys()]) == 0):
-            return
+#         """
+#         if (len(self.replacements) == 0) \
+#         or (len([k for k in self.replacements.keys() if k in self.class2idx.keys()]) == 0):
+#             # No-op if replacements keys are empty or have zero overlap with class2idx keys.
+#             return
         
-        log.info(f'LabelEncoder replacing {len(self.replace.keys())} class encodings with that other an another class')
-        log.info('Replacing: ' + str({k:v for k,v in self.replace.items() if k in self.class2idx}))
-        for old, new in self.replace.items():
-            if old in list(self.class2idx.keys()):
-                self.class2idx[old] = self.class2idx[new]
-        self.index2class = {v: k for k, v in self.class2idx.items()}
-        self.classes = [k for k in self.class2idx.keys() if k not in self.replace.keys()]                
+#         if self.verbose:
+#             log.info(f'LabelEncoder replacing {len(self.replacements.keys())} class encodings with that other an another class')
+#             log.info('Replacing: ' + str({k:v for k,v in self.replacements.items() if k in self.class2idx}))
+#         for old, new in self.replacements.items():
+#             if old in list(self.class2idx.keys()):
+#                 self.class2idx[old] = self.class2idx[new]
         
     def __len__(self):
-        return len(self.classes)
+        return len(self.idx2class)
+
+    @property
+    def num_classes(self):
+        return len(self)
 
     def __str__(self):
         msg = f"<LabelEncoder(num_classes={len(self)})>"
-        if len(self.replace) > 0:
-            msg += "\n" + f"<num_replaced_classes={len(self.replace)}"
+        if len(self.replacements) > 0:
+            msg += "\n" + f"<num_replaced_classes={len(self.replacements)}>"
         return msg
 
     def fit(self, y):
@@ -72,34 +91,42 @@ class LabelEncoder(object):
         counts = collections.Counter(y)
         self.num_samples += sum(counts.values())
         
-        classes = list(counts.keys())
-
-        old_num_classes = len(self)
-        new_classes = [label for label in classes if label not in self.classes]
+        classes = sorted(list(counts.keys()))
+        new_classes = sorted([label for label in classes if (label not in self.classes) and (label not in self.replacements.keys())])
+        replace_classes = sorted([label for label in classes if label in self.replacements.keys()])
         
-        for i, label in enumerate(new_classes):
-            self.class2idx[label] = old_num_classes + i
-        self.index2class = {v: k for k, v in self.class2idx.items()}
-        
-        self.classes = [k for k in self.class2idx.keys() if k not in self.replace.keys()]        
-        self.replace_class2idx_items()
-
-        new_classes = [c for c in new_classes if c not in self.replace.keys()]
+        old_num_classes = len(self)        
+        old_highest_class = None
+        idx = 0
+        if len(self.idx2class) > 0:
+            old_highest_class = max(self.idx2class.keys())
+            idx = old_highest_class + 1
+            
+        for label in new_classes:
+            self.class2idx[label] = idx
+            idx += 1
+        for label in replace_classes:
+            if self.replacements[label] in self.class2idx:
+                self.class2idx[label] = self.class2idx[self.replacements[label]]
+            else:
+                print(f"[Warning]: label {label} marked for replacement, but its replacement label has yet to be assigned an int encoding in class2idx.")
+            
+        new_classes = [c for c in new_classes if c not in self.replacements.keys()]
         if len(new_classes):
             log.debug(f"[FITTING] {len(y)} samples with {len(classes)} classes, adding {len(new_classes)} new class labels. Latest num_classes = {len(self)}")
-        assert len(self) == (old_num_classes + len(new_classes))
+        assert len(self) == (old_num_classes + len(new_classes)), f"len(self)={len(self)}, (old_num_classes={old_num_classes}, len(new_classes)={len(new_classes)})"
+        assert np.all([label in self.idx2class.values() for label in new_classes])
         return self
 
     def encode(self, y):
         if not hasattr(y,"__len__"):
             y = [y]
-#         print(self.class2idx)
         return np.array([self.class2idx[label] for label in y])
 
     def decode(self, y):
         if not hasattr(y,"__len__"):
             y = [y]
-        return np.array([self.index2class[label] for label in y])
+        return np.array([self.idx2class[label] for label in y])
 
     def save(self, fp):
         with open(fp, "w") as fp:
@@ -114,13 +141,112 @@ class LabelEncoder(object):
     
     def getstate(self):
         return {"class2idx": self.class2idx,
-                "replace": self.replace}
+                "replacements": self.replacements}
     
     def __repr__(self):
         disp = f"""<{str(type(self)).strip("'>").split('.')[-1]}>:\n"""
         disp += f"    num_classes: {len(self)}\n"
         disp += f"    fit on num_samples: {self.num_samples}"
         return disp
+
+
+#################################
+#################################
+# class LabelEncoder(object):
+    
+#     """Label encoder for tag labels."""
+#     def __init__(self,
+#                  class2idx: Dict[str,int]=None,
+#                  replace: Optional[Dict[str,str]]=None):
+#         self.class2idx = class2idx or {}
+#         self.replace = replace or {}
+#         self.index2class = {v: k for k, v in self.class2idx.items()}
+#         self.classes = [k for k in self.class2idx.keys() if k not in self.replace.keys()]
+        
+#         self.num_samples = 0
+#         self.verbose=False
+#         self.replace_class2idx_items()
+
+        
+#     def replace_class2idx_items(self):
+#         if (len(self.replace) == 0) \
+#         or (len([k for k in self.replace.keys() if k in self.class2idx.keys()]) == 0):
+#             return
+#         if self.verbose:
+#             log.info(f'LabelEncoder replacing {len(self.replace.keys())} class encodings with that other an another class')
+#             log.info('Replacing: ' + str({k:v for k,v in self.replace.items() if k in self.class2idx}))
+#         for old, new in self.replace.items():
+#             if old in list(self.class2idx.keys()):
+#                 self.class2idx[old] = self.class2idx[new]
+#         self.index2class = {v: k for k, v in self.class2idx.items()}
+#         self.classes = [k for k in self.class2idx.keys() if k not in self.replace.keys()]                
+        
+#     def __len__(self):
+#         return len(self.index2class)
+# #         return len(self.classes)
+
+#     def __str__(self):
+#         msg = f"<LabelEncoder(num_classes={len(self)})>"
+#         if len(self.replace) > 0:
+#             msg += "\n" + f"<num_replaced_classes={len(self.replace)}>"
+#         return msg
+
+#     def fit(self, y):
+# #         from IPython.core.debugger import set_trace
+# #         set_trace()
+        
+#         counts = collections.Counter(y)
+#         self.num_samples += sum(counts.values())
+        
+#         classes = list(counts.keys())
+
+#         old_num_classes = len(self)
+#         new_classes = sorted([label for label in classes if label not in self.classes])
+        
+#         for i, label in enumerate(new_classes):
+#             self.class2idx[label] = old_num_classes + i
+#         self.index2class = {v: k for k, v in self.class2idx.items()}
+        
+#         self.classes = [k for k in self.class2idx.keys() if k not in self.replace.keys()]        
+#         self.replace_class2idx_items()
+
+#         new_classes = [c for c in new_classes if c not in self.replace.keys()]
+#         if len(new_classes):
+#             log.debug(f"[FITTING] {len(y)} samples with {len(classes)} classes, adding {len(new_classes)} new class labels. Latest num_classes = {len(self)}")
+#         assert len(self) == (old_num_classes + len(new_classes))
+#         return self
+
+#     def encode(self, y):
+#         if not hasattr(y,"__len__"):
+#             y = [y]
+# #         print(self.class2idx)
+#         return np.array([self.class2idx[label] for label in y])
+
+#     def decode(self, y):
+#         if not hasattr(y,"__len__"):
+#             y = [y]
+#         return np.array([self.index2class[label] for label in y])
+
+#     def save(self, fp):
+#         with open(fp, "w") as fp:
+#             contents = self.getstate() # {"class2idx": self.class2idx}
+#             json.dump(contents, fp, indent=4, sort_keys=False)
+
+#     @classmethod
+#     def load(cls, fp):
+#         with open(fp, "r") as fp:
+#             kwargs = json.load(fp=fp)
+#         return cls(**kwargs)
+    
+#     def getstate(self):
+#         return {"class2idx": self.class2idx,
+#                 "replace": self.replace}
+    
+#     def __repr__(self):
+#         disp = f"""<{str(type(self)).strip("'>").split('.')[-1]}>:\n"""
+#         disp += f"    num_classes: {len(self)}\n"
+#         disp += f"    fit on num_samples: {self.num_samples}"
+#         return disp
         
 #     def encode(self, y):
 #         y_one_hot = np.zeros((len(y), len(self.class2idx)), dtype=int)

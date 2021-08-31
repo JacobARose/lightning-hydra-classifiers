@@ -96,6 +96,9 @@ class PathSchema:
 
         return family, genus, species, collection, catalog_number
     
+    def split(self, sep):
+        return self.schema_parts
+    
 
 totensor: Callable = torchvision.transforms.ToTensor()
 toPIL: Callable = torchvision.transforms.ToPILImage("RGB")

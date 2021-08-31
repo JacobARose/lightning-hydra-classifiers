@@ -180,7 +180,7 @@ from lightning_hydra_classifiers.data.utils import catalog_registry
     
 @dataclass
 class DatasetConfig(BaseDatasetConfig):
-    base_dataset_name: str = "Extant"
+    base_dataset_name: str = "Extant_Leaves"
     class_type: str = "family"
     threshold: Optional[int] = 10
     resolution: int = 512
@@ -311,13 +311,6 @@ class CSVDatasetConfig(BaseDatasetConfig):
 
 
 
-
-
-
-
-
-
-
 @dataclass
 class SampleSchema:
     path : Union[str, Path] = None
@@ -357,7 +350,6 @@ class CustomDataset(torchdata.datasets.Files): # (CommonDataset):
         self.config = config or {}
         self.transform = transform
         self.eager_encode_targets = eager_encode_targets
-        
         self.setup(samples_df=samples_df)
         
         
@@ -379,7 +371,7 @@ class CustomDataset(torchdata.datasets.Files): # (CommonDataset):
         target = self.label_encoder.class2idx[target]
         
         if self.transform is not None:
-            image = totensor(image)
+#             image = totensor(image)
             image = self.transform(image)
 #         if self.target_transform is not None:
 #             target = self.target_transform(target)
@@ -413,11 +405,15 @@ class CustomDataset(torchdata.datasets.Files): # (CommonDataset):
     def parse_sample(self, index: int):
         pass
     
+    @property
+    def classes(self):
+        return self.label_encoder.classes
+    
     def __repr__(self):
         disp = f"""<{str(type(self)).strip("'>").split('.')[1]}>:"""
         disp += '\n\t' + self.config.__repr__().replace('\n','\n\t')
-        if len(self):
-            disp += "\n\t" + f"num_samples: {len(self)}"
+#         if len(self):
+#             disp += "\n\t" + f"num_samples: {len(self)}"
         return disp
 
     
@@ -466,7 +462,37 @@ class CustomDataset(torchdata.datasets.Files): # (CommonDataset):
         out.config.update(subset_key=subset_key,
                           num_samples=len(out))
         return out
+    
+    def get_unsupervised(self):
+        return UnsupervisedDatasetWrapper(self)
 
+    
+    
+class UnsupervisedDatasetWrapper(torchdata.datasets.Files):#torchvision.datasets.ImageFolder):
+    
+    def __init__(self, dataset):
+        super().__init__(files=dataset.files)
+        self.dataset = dataset
+#         super().__init__(samples_df=dataset.samples_df,
+#                            path_schema=dataset.path_schema)
+        
+        
+        
+    def __getitem__(self, index):
+        return self.dataset[index][0]
+    
+    def __len__(self):
+        return len(self.dataset)
+    
+    def __repr__(self):
+        out = "<UnsupervisedDatasetWrapper>\n"
+        out += self.dataset.__repr__()
+        return out
+    
+#     def parse_sample(self, index: int):
+#         path = self.files[index]
+    
+    
     
     
     
@@ -514,8 +540,8 @@ class CSVDataset(CustomDataset):
             new = {k: cls(samples_df=files_df[k],  \
                           eager_encode_targets=eager_encode_targets) for k in subset_keys}
             for k in subset_keys:
-                new.config = deepcopy(config)
-                new.config.subset_key = k
+                new[k].config = deepcopy(config)
+                new[k].config.subset_key = k
 #         if len(files_df.keys())==1: 
         if len(subset_keys)==1:
             if isinstance(files_df, dict):
@@ -545,7 +571,7 @@ class CSVDataset(CustomDataset):
             self.label_encoder.fit(self.targets)
         
         if self.eager_encode_targets:
-            print("encoding all targets")
+#             print("encoding all targets")
             self.targets = self.label_encoder.encode(self.targets).tolist()
         
     
@@ -566,8 +592,6 @@ class CSVDataset(CustomDataset):
 
 
 class DataSplitter:
-        
-#     valid_splits: Tuple[str] = ("train", "val", "test")
 
     @classmethod
     def create_trainvaltest_splits(cls,
@@ -607,8 +631,8 @@ class DataSplitter:
                                              random_state=seed,
                                              stratify=stratify)
 
-        for k,v in data_splits.items():
-            print(k, len(v[0]))
+#         for k,v in data_splits.items():
+#             print(k, len(v[0]))
 
         dataset_splits={}
         for split, (split_idx, split_y) in data_splits.items():
@@ -663,7 +687,7 @@ def create_dataset_A_in_B(dataset_A,
 
 
 def export_dataset_catalog_configuration(output_dir: str = "/media/data_cifs/projects/prj_fossils/users/jacob/experiments/July2021-Nov2021/csv_datasets/leavesdb-v1_0",
-                                         base_dataset_name = "Extant",
+                                         base_dataset_name = "Extant_Leaves",
                                          threshold = 100,
                                          resolution = 512,
                                          version: str = "v1_0",
@@ -839,7 +863,7 @@ def make_extant(args):
     output_dir = args.output_dir
     version = args.version
 
-    base_dataset_name = "Extant"
+    base_dataset_name = "Extant_Leaves"
     thresholds = [10,100]
     resolutions = [512,1024]
     path_schema = "{family}_{genus}_{species}_{collection}_{catalog_number}"
@@ -854,7 +878,7 @@ def make_extant(args):
                                                  version = version,
                                                  path_schema = path_schema)
 
-    print(f'FINISHED ALL IN Extant')
+    print(f'FINISHED ALL IN Extant_Leaves')
     print('=='*15)
 
     
@@ -891,7 +915,7 @@ def make_extant_minus_pnas(args):
     output_dir = args.output_dir
     version = args.version
     
-    base_names = {"A": "Extant",
+    base_names = {"A": "Extant_Leaves",
                   "B": "PNAS"}
     thresholds = [{"A":100,
                    "B":100},
@@ -926,7 +950,7 @@ def make_pnas_minus_extant(args):
     
 
     base_names = {"A": "PNAS",
-                  "B": "Extant"}
+                  "B": "Extant_Leaves"}
     thresholds = [{"A":100,
                    "B":100},
                  {"A":100,
@@ -959,7 +983,7 @@ def make_extant_w_pnas(args):
     output_dir = args.output_dir
     
 
-    base_names = {"A": "Extant",
+    base_names = {"A": "Extant_Leaves",
                   "B": "PNAS"}
     thresholds = [{"A":100,
                    "B":100},
@@ -987,6 +1011,10 @@ def make_extant_w_pnas(args):
 
     
     
+CSV_CATALOG_DIR_V0_3 = "/media/data_cifs/projects/prj_fossils/users/jacob/experiments/July2021-Nov2021/csv_datasets/leavesdb-v0_3"    
+CSV_CATALOG_DIR_V1_0 = "/media/data_cifs/projects/prj_fossils/users/jacob/experiments/July2021-Nov2021/csv_datasets/leavesdb-v1_0"
+EXPERIMENTAL_DATASETS_DIR = "/media/data_cifs/projects/prj_fossils/users/jacob/experiments/July2021-Nov2021/csv_datasets/experimental_datasets"
+
         
 def cmdline_args():
     p = argparse.ArgumentParser(description="Export a series of dataset artifacts (containing csv catalog, yml config, json labels) for each dataset, provided that the corresponding images are pointed to by one of the file paths hard-coded in catalog_registry.py.")
