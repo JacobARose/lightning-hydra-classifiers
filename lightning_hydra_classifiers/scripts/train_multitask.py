@@ -52,6 +52,8 @@ from lightning_hydra_classifiers.utils.metric_utils import get_per_class_metrics
 from lightning_hydra_classifiers.utils.logging_utils import get_wandb_logger
 import wandb
 from lightning_hydra_classifiers.experiments.transfer_experiment import TransferExperiment
+
+from lightning_hydra_classifiers.experiments.reference_transfer_experiment import CIFAR10DataModule
 from lightning_hydra_classifiers.models.backbones import backbone
 # from torchinfo import summary
 # model_stats = summary(your_model, (1, 3, 28, 28), verbose=0)
@@ -332,48 +334,6 @@ class ImagePredictionLogger(pl.Callback):
             
             
         
-#     def on_validation_epoch_end(self, trainer, pl_module):
-#         # Bring the tensors to CPU
-#         val_imgs = self.val_imgs.to(device=pl_module.device)
-#         val_labels = self.val_labels.to(device=pl_module.device)
-#         # Get model prediction
-#         logits = pl_module(val_imgs)
-#         preds = torch.argmax(logits, -1)
-#         # Log the images as wandb Image
-#         trainer.logger.experiment.log({
-#             "examples":[wandb.Image(x, caption=f"Pred:{pred}, Label:{y}") 
-#                            for x, pred, y in zip(val_imgs[:self.num_samples], 
-#                                                  preds[:self.num_samples], 
-#                                                  val_labels[:self.num_samples])]
-#             }, commit=False)
-
-
-#     config = Munch({
-#         "seed":42,
-#         "num_epochs": 10,
-#         "precision": 16,
-#         "device": torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-#     })
-
-#     config.data = {
-#         "image_size": 224,
-#         "image_buffer_size": 32, 
-#         "batch_size": 32,
-#         "num_workers": 4,
-#         "pin_memory": True
-#     }
-#     config.model = {"model_name": "resnet50",
-#                     "pretrained": "imagenet",
-#                     "lr": 3e-4,
-#                     "num_classes": None,
-#                     "t_max": 20,
-#                     "min_lr": 1e-6}
-
-#     config.callbacks = {"monitor": {"metric":"val_loss",
-#                                     "mode": "min"}
-#                        }
-
-
 
 
 def train_source_task(config: argparse.Namespace):
@@ -382,12 +342,21 @@ def train_source_task(config: argparse.Namespace):
     pl.seed_everything(config['seed'])
 
     # ## DataModule
-    datamodule = PlantDataModule(batch_size=config.data.batch_size,
-                                 task_id=0,
-                                 image_size=config.data.image_size,
-                                 image_buffer_size=config.data.image_buffer_size,
-                                 num_workers=config.data.num_workers,
-                                 pin_memory=config.data.pin_memory)
+    if config.debug == True:
+        print(f"Debug mode activated, loading CIFAR10 datamodule")
+        datamodule = CIFAR10DataModule(batch_size=config.data.batch_size,
+                                       task_id=0,
+                                       image_size=config.data.image_size,
+                                       image_buffer_size=config.data.image_buffer_size,
+                                       num_workers=config.data.num_workers,
+                                       pin_memory=config.data.pin_memory)
+    else:
+        datamodule = PlantDataModule(batch_size=config.data.batch_size,
+                                     task_id=0,
+                                     image_size=config.data.image_size,
+                                     image_buffer_size=config.data.image_buffer_size,
+                                     num_workers=config.data.num_workers,
+                                     pin_memory=config.data.pin_memory)
     datamodule.setup("fit")
     config.model.num_classes = datamodule.num_classes
     pp(config)
@@ -484,7 +453,8 @@ def cmdline_args():
                    help="Use pretrained imagenet weights or randomly initialize from scratch.")
     p.add_argument("-lr", "--learning_rate", dest="learning_rate", type=float, default=3e-4,
                    help="Initial learning rate.")
-
+    p.add_argument("-d", "--debug", dest="debug", action="store_true", default=False,
+                   help="Flag for activating debug-related settings. Currently limited to switching out datamodule to use CIFAR10")
     args = parser.parse_args([""])
     print("Args:")
     pp(args)

@@ -48,6 +48,7 @@ import collections
 from PIL import Image
 import torch
 
+from lightning_hydra_classifiers.data.utils import catalog_registry
 from lightning_hydra_classifiers.utils.common_utils import (LabelEncoder,
                                                             trainval_split,
                                                             trainvaltest_split)
@@ -175,7 +176,7 @@ class BaseDatasetConfig:
 
 
 
-from lightning_hydra_classifiers.data.utils import catalog_registry
+
 
     
 @dataclass
@@ -385,6 +386,14 @@ class CustomDataset(torchdata.datasets.Files): # (CommonDataset):
               samples_df: pd.DataFrame=None,
               label_encoder: LabelEncoder=None,
               fit_targets: bool=True):
+        """
+        Running setup() should result in the Dataset having assigned values for:
+            self.samples
+            self.targets
+            self.samples_df
+            self.label_encoder
+        
+        """
         if samples_df is not None:
             self.samples_df = samples_df.convert_dtypes()
         self.samples = [self.parse_sample(idx) for idx in range((len(self)))]
@@ -542,7 +551,7 @@ class CSVDataset(CustomDataset):
             for k in subset_keys:
                 new[k].config = deepcopy(config)
                 new[k].config.subset_key = k
-#         if len(files_df.keys())==1: 
+
         if len(subset_keys)==1:
             if isinstance(files_df, dict):
                 files_df = files_df[subset_keys[0]]
@@ -559,21 +568,21 @@ class CSVDataset(CustomDataset):
         
         if samples_df is not None:
             self.samples_df = samples_df.convert_dtypes()
-        
-
         self.files = self.samples_df[self.x_col].apply(lambda x: Path(x)).tolist()
-        self.samples = [self.parse_sample(idx) for idx in range((len(self)))]
-        self.targets = [sample[1] for sample in self.samples]       
-        self.samples_df = pd.DataFrame(self.samples).convert_dtypes()
+        super().setup(samples_df=self.samples_df,
+                      label_encoder=label_encoder,
+                      fit_targets=fit_targets)
+#         self.samples = [self.parse_sample(idx) for idx in range((len(self)))]
+#         self.targets = [sample[1] for sample in self.samples]       
+#         self.samples_df = pd.DataFrame(self.samples).convert_dtypes()
         
-        self.label_encoder = label_encoder or LabelEncoder()
-        if fit_targets:
-            self.label_encoder.fit(self.targets)
+#         self.label_encoder = label_encoder or LabelEncoder()
+#         if fit_targets:
+#             self.label_encoder.fit(self.targets)
         
-        if self.eager_encode_targets:
-#             print("encoding all targets")
-            self.targets = self.label_encoder.encode(self.targets).tolist()
-        
+#         if self.eager_encode_targets:
+#             self.targets = self.label_encoder.encode(self.targets).tolist()
+
     
     def parse_sample(self, index: int):
         
@@ -631,9 +640,6 @@ class DataSplitter:
                                              random_state=seed,
                                              stratify=stratify)
 
-#         for k,v in data_splits.items():
-#             print(k, len(v[0]))
-
         dataset_splits={}
         for split, (split_idx, split_y) in data_splits.items():
             print(split, len(split_idx))
@@ -645,10 +651,6 @@ class DataSplitter:
         
         for d in [*list(dataset_splits.values()), data]:
             d.label_encoder = label_encoder
-#             d.config.num_classes = len(d.label_encoder)
-#             d.config.num_samples = len(d)
-
-#         log.debug(f"[RUNNING] [create_trainvaltest_splits()] splits={splits}")
         return dataset_splits
 
 
