@@ -38,7 +38,6 @@ import torchvision
 from torchvision import transforms
 import pytorch_lightning as pl
 import timm
-
 torch.backends.cudnn.benchmark = True
 
 
@@ -52,9 +51,7 @@ from lightning_hydra_classifiers.data.utils.make_catalogs import *
 from lightning_hydra_classifiers.utils.metric_utils import get_per_class_metrics, get_scalar_metrics
 from lightning_hydra_classifiers.utils.logging_utils import get_wandb_logger
 import wandb
-# torch.manual_seed(17)
 from lightning_hydra_classifiers.experiments.transfer_experiment import TransferExperiment
-# from lightning_hydra_classifiers.models.backbones.backbone import build_model
 from lightning_hydra_classifiers.models.backbones import backbone
 # from torchinfo import summary
 # model_stats = summary(your_model, (1, 3, 28, 28), verbose=0)
@@ -103,7 +100,7 @@ class PlantDataModule(pl.LightningDataModule):
                                          scale=(0.25, 1.2),
                                          ratio=(0.7, 1.3),
                                          interpolation=2),
-            torchvision.transforms.ToTensor(),
+            transforms.ToTensor(),
             transforms.RandomHorizontalFlip(),
             transforms.Normalize(self.mean, self.std),
             transforms.Grayscale(num_output_channels=3)
@@ -111,7 +108,7 @@ class PlantDataModule(pl.LightningDataModule):
 
         self.val_transform = transforms.Compose([
             transforms.Resize(self.image_size+self.image_buffer_size),
-            torchvision.transforms.ToTensor(),
+            transforms.ToTensor(),
             transforms.CenterCrop(self.image_size),
             transforms.Normalize(self.mean, self.std),
             transforms.Grayscale(num_output_channels=3)            
@@ -438,7 +435,9 @@ def train_source_task(config: argparse.Namespace):
                           img_prediction_callback],
     #                        ImagePredictionLogger(val_samples)],
     #             checkpoint_callback=checkpoint_callback,
+                overfit_batches=2,
                 logger=wandb_logger,
+                track_grad_norm=2,
                 weights_summary='top')
 
 
@@ -527,7 +526,7 @@ if __name__ == '__main__':
     args, config = cmdline_args()
     os.makedirs(config.output_dir, exist_ok=True)
     
-    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
     
     
     train_source_task(config)
