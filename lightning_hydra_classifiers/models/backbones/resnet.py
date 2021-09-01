@@ -35,6 +35,9 @@ __all__ = ['ResNet', 'resnet18', 'resnet34', 'resnet50', 'resnet101',
 # from collections import OrderedDict
 
 
+
+
+
 class ResNet(models.ResNet, BaseModule):
     """
     ResNets without fully connected layer
@@ -47,8 +50,8 @@ class ResNet(models.ResNet, BaseModule):
     def __init__(self, *args, **kwargs):
         super(ResNet, self).__init__(*args, **kwargs)
         self._out_features = self.fc.in_features
-        del self.avgpool
-        del self.fc
+#         del self.avgpool
+#         del self.fc
 
     def stem(self, x):
         x = self.conv1(x)
@@ -66,10 +69,13 @@ class ResNet(models.ResNet, BaseModule):
         x = self.layer3(x)
         x = self.layer4(x)
 
-#         x = self.avgpool(x)
-#         x = torch.flatten(x, 1)
-#         x = x.view(-1, self._out_features)
-        return x
+        x = self.avgpool(x)
+        x = torch.flatten(x, 1)
+        x = x.view(-1, self.out_features)
+        return self.fc(x)
+
+    def get_classifier(self):
+        return self.fc
 
     @property
     def out_features(self) -> int:
@@ -223,16 +229,90 @@ AVAILABLE_MODELS = ['resnet18', 'resnet34', 'resnet50', 'resnet101',
                     'resnet152', 'resnext50_32x4d', 'resnext101_32x8d',
                     'wide_resnet50_2', 'wide_resnet101_2']
 
+# def build_model(model_name: str,
+#                 pretrained: Union[str, bool]=False,
+#                 progress: bool=True,
+#                 **kwargs) -> nn.Module:
+#     assert model_name in AVAILABLE_MODELS, f'[ERROR] Please only choose from available models: {AVAILABLE_MODELS}'    
+#     model_func = globals()[model_name]
+#     if pretrained == True:
+#         pretrained = "imagenet"
+        
+#     return model_func(pretrained=pretrained, progress=progress, **kwargs)
+
+
+
+
+
+
+class CustomResNet(BaseModule):
+    def __init__(self, model_name='resnet50', num_classes=1000, pretrained=True, progress: bool=True):
+        super().__init__()
+        
+        assert model_name in AVAILABLE_MODELS, f'[ERROR] Please only choose from available models: {AVAILABLE_MODELS}'    
+        backbone_model_func = globals()[model_name]
+        if pretrained == True:
+            pretrained = "imagenet"
+
+        self.model = backbone_model_func(pretrained=pretrained, progress=progress)#, **kwargs)
+
+        
+#         self.model = timm.create_model(model_name, pretrained=pretrained)
+        in_features = self.model.get_classifier().in_features
+#         in_features = self.model.in_features
+        print(f"in_features={in_features}, num_classes={num_classes}")
+        self.model.fc = nn.Linear(in_features, num_classes)
+
+    def forward(self, x):
+        x = self.model(x)
+        return x
+    
+    def unfreeze_at(self, layer: str):
+        assert layer in efficientnet_layers
+        self.model.requires_grad = True        
+        for name, param in model.named_parameters():
+            if layer in name:
+                break
+            param.requires_grad = False
+        
+            
 def build_model(model_name: str,
                 pretrained: Union[str, bool]=False,
                 progress: bool=True,
+                num_classes: int=1000,
                 **kwargs) -> nn.Module:
     assert model_name in AVAILABLE_MODELS, f'[ERROR] Please only choose from available models: {AVAILABLE_MODELS}'    
-    model_func = globals()[model_name]
+#     model_func = globals()[model_name]
     if pretrained == True:
         pretrained = "imagenet"
-        
-    return model_func(pretrained=pretrained, progress=progress, **kwargs)
+
+    return CustomResNet(model_name=model_name, pretrained=pretrained, progress=progress, num_classes=num_classes, **kwargs)
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

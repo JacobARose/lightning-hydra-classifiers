@@ -73,11 +73,12 @@ AVAILABLE_MODELS = ['efficientnet_b0',
 def build_model(model_name: str,
                 pretrained: Union[str, bool]=False,
                 progress: bool=True,
+                num_classes: int=1000,
                 **kwargs) -> nn.Module:
     assert model_name in AVAILABLE_MODELS, f'[ERROR] Please only choose from available models: {AVAILABLE_MODELS}'    
 #     model_func = globals()[model_name]
     if pretrained == True:
         pretrained = "imagenet"
 
-    return CustomEfficientNet(model_name=model_name, pretrained=pretrained, progress=progress, **kwargs)
+    return CustomEfficientNet(model_name=model_name, pretrained=pretrained, progress=progress, num_classes=num_classes, **kwargs)
     

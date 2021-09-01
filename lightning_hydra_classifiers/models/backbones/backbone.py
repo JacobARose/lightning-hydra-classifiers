@@ -38,6 +38,7 @@ AVAILABLE_MODELS = {"resnet":resnet.AVAILABLE_MODELS,
 def build_model(model_name: str,
                 pretrained: bool=False,
                 progress: bool=True,
+                num_classes: int=1000,
                 **kwargs) -> nn.Module:
 
 #     if 'resnet' in model_name:
@@ -45,6 +46,7 @@ def build_model(model_name: str,
         model = resnet.build_model(model_name=model_name,
                                   pretrained=pretrained,
                                   progress=progress,
+                                  num_classes=num_classes,
                                   **kwargs)
 
 #     elif 'senet' in model_name:
@@ -52,6 +54,7 @@ def build_model(model_name: str,
         model = senet.build_model(model_name=model_name,
                                   pretrained=pretrained,
                                   progress=progress,
+                                  num_classes=num_classes,
                                   **kwargs)
 
 #     elif 'efficientnet' in model_name:
@@ -59,6 +62,7 @@ def build_model(model_name: str,
         model = efficientnet.build_model(model_name=model_name,
                                          pretrained=pretrained,
                                          progress=progress,
+                                         num_classes=num_classes,
                                          **kwargs)
     
     else:

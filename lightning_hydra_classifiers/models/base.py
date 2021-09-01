@@ -5,7 +5,7 @@ Author: Jacob A Rose
 Created: Saturday May 29th, 2021
 
 """
-
+from typing import *
 import torch
 from torch import nn
 import torchmetrics as metrics
@@ -75,8 +75,10 @@ class BaseModule(nn.Module):
 
 
     @classmethod
-    def freeze(cls, model: nn.Module):
-        for param in model.parameters():
+    def freeze(cls, model: nn.Module, up_to_layer: Optional[str]=None):
+        for name, param in model.named_parameters():
+            if name == up_to_layer:
+                break
             param.requires_grad = False
             
     @classmethod
@@ -194,7 +196,23 @@ class BaseLightningModule(pl.LightningModule):
             self.metrics_test = get_scalar_metrics(num_classes=self.num_classes, average='macro', prefix='test')
             self.metrics_test_per_class = get_per_class_metrics(num_classes=self.num_classes, prefix='test')
     
-    
+    def freeze_up_to(self, layer: Union[int, str]=None):
+        
+        if isinstance(layer, int):
+            if layer < 0:
+                layer = len(list(self.model.parameters())) + layer
+            
+        self.model.enable_grad = True
+        for i, (name, param) in enumerate(self.model.named_parameters()):
+            if isinstance(layer, int):
+                if layer == i:
+                    break
+            elif isinstance(layer, str):
+                if layer == name:
+                    break
+            else:
+                param.enable_grad = False
+        
     
     
 
