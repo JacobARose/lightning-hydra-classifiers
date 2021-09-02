@@ -27,14 +27,16 @@ import seaborn as sns
 from more_itertools import collapse, flatten
 import dataclasses
 
+from torchvision.datasets import ImageFolder
+
 from lightning_hydra_classifiers.utils import template_utils
-from lightning_hydra_classifiers.utils.common_utils import LabelEncoder
+from lightning_hydra_classifiers.utils.common_utils import LabelEncoder, DataSplitter
 
 log = template_utils.get_logger(__name__)
 
 
 __all__ = ["save_config", "load_config", 
-           "Extract", "DataSplitter",
+           "Extract", #"DataSplitter",
            "export_image_data_diagnostics", 
            "export_dataset_to_csv",
            "import_dataset_from_csv",
@@ -170,75 +172,8 @@ class Extract:
         encoder.save(path)
 
         
-
-
-        
-        
-
 #################################################
 #################################################
-
-
-class DataSplitter:
-
-    @classmethod
-    def create_trainvaltest_splits(cls,
-                                   data: torchdata.Dataset,
-                                   test_split: Union[str, float]=0.3,
-                                   val_train_split: float=0.2,
-                                   shuffle: bool=True,
-                                   seed: int=3654,
-                                   stratify: bool=True,
-                                   plot_distributions: bool=False) -> Tuple["FossilDataset"]:
-        if (test_split == "test") or (test_split is None):
-            train_split = 1 - val_train_split
-            if hasattr(data, f"test_dataset"):
-                data = getattr(data, f"train_dataset")            
-        elif isinstance(test_split, float):
-            train_split = 1 - (test_split + val_train_split)
-        else:
-            raise ValueError(f"Invalid split arguments: val_train_split={val_train_split}, test_split={test_split}")
-            
-
-        splits=(train_split, val_train_split, test_split)
-        splits = list(filter(lambda x: isinstance(x, float), splits))
-        y = data.targets
-        
-        if len(splits)==2:
-            data_splits = trainval_split(x=None,
-                                         y=y,
-                                         val_train_split=splits[-1],
-                                         random_state=seed,
-                                         stratify=stratify)
-            
-        else:
-            data_splits = trainvaltest_split(x=None,
-                                             y=y,
-                                             splits=splits,
-                                             random_state=seed,
-                                             stratify=stratify)
-        dataset_splits={}
-        for split, (split_idx, split_y) in data_splits.items():
-            print(split, len(split_idx))
-            dataset_splits[split] = data.select_subset_from_indices(indices=split_idx,
-                                                                    x_col = 'path',
-                                                                    y_col = "family")
-        
-        label_encoder = LabelEncoder() # class2idx)
-        label_encoder.fit(dataset_splits["train"].targets)
-        
-        for d in [*list(dataset_splits.values()), data]:
-            d.label_encoder = label_encoder
-#             d.config.num_classes = len(d.label_encoder)
-#             d.config.num_samples = len(d)
-
-        log.debug(f"[RUNNING] [create_trainvaltest_splits()] splits={splits}")
-        return dataset_splits
-
-
-
-
-
 
 #################################################
 #################################################
@@ -366,19 +301,6 @@ def import_dataset_from_csv(data_catalog_dir: str) -> Tuple[Dict[str, "CommonDat
 
 
 
-
-
-
-
-
-
-from torchvision.datasets import ImageFolder
-# def get_image_dataset(root_dir):
-#     """
-#     Simple wrapper around torchvision.datasets.ImageFolder
-#     """
-#     dataset = ImageFolder(root_dir)
-#     return dataset
 
 ##################
 ##################

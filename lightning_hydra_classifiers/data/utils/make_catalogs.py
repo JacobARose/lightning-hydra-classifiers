@@ -32,7 +32,7 @@ from copy import deepcopy
 from functools import cached_property
 from lightning_hydra_classifiers.data.common import PathSchema
 from lightning_hydra_classifiers.utils.dataset_management_utils import Extract as ExtractBase
-from lightning_hydra_classifiers.utils.common_utils import LabelEncoder
+# from lightning_hydra_classifiers.utils.common_utils import LabelEncoder
 from IPython.display import display
 
 import torchdata
@@ -49,7 +49,8 @@ from PIL import Image
 import torch
 
 from lightning_hydra_classifiers.data.utils import catalog_registry
-from lightning_hydra_classifiers.utils.common_utils import (LabelEncoder,
+from lightning_hydra_classifiers.utils.common_utils import (DataSplitter,
+                                                            LabelEncoder,
                                                             trainval_split,
                                                             trainvaltest_split)
 import torchdata
@@ -600,58 +601,58 @@ class CSVDataset(CustomDataset):
 
 
 
-class DataSplitter:
+# class DataSplitter:
 
-    @classmethod
-    def create_trainvaltest_splits(cls,
-                                   data: torchdata.Dataset,
-                                   val_split: float=0.2,
-                                   test_split: Optional[Union[str, float]]=None, #0.3,
-                                   shuffle: bool=True,
-                                   seed: int=3654,
-                                   stratify: bool=True,
-                                   plot_distributions: bool=False) -> Tuple["FossilDataset"]:
+#     @classmethod
+#     def create_trainvaltest_splits(cls,
+#                                    data: torchdata.Dataset,
+#                                    val_split: float=0.2,
+#                                    test_split: Optional[Union[str, float]]=None, #0.3,
+#                                    shuffle: bool=True,
+#                                    seed: int=3654,
+#                                    stratify: bool=True,
+#                                    plot_distributions: bool=False) -> Tuple["FossilDataset"]:
         
-        if (test_split == "test") or (test_split is None):
-            train_split = 1 - val_split
-            if hasattr(data, f"test_dataset"):
-                data = getattr(data, f"train_dataset")            
-        elif isinstance(test_split, float):
-            train_split = 1 - (test_split + val_split)
-        else:
-            raise ValueError(f"Invalid split arguments: val_train_split={val_train_split}, test_split={test_split}")
+#         if (test_split == "test") or (test_split is None):
+#             train_split = 1 - val_split
+#             if hasattr(data, f"test_dataset"):
+#                 data = getattr(data, f"train_dataset")            
+#         elif isinstance(test_split, float):
+#             train_split = 1 - (test_split + val_split)
+#         else:
+#             raise ValueError(f"Invalid split arguments: val_train_split={val_train_split}, test_split={test_split}")
 
 
-        splits=(train_split, val_split, test_split)
-        splits = list(filter(lambda x: isinstance(x, float), splits))
-        y = data.targets
+#         splits=(train_split, val_split, test_split)
+#         splits = list(filter(lambda x: isinstance(x, float), splits))
+#         y = data.targets
 
-        if len(splits)==2:
-            data_splits = trainval_split(x=None,
-                                         y=y,
-                                         val_train_split=splits[-1],
-                                         random_state=seed,
-                                         stratify=stratify)
+#         if len(splits)==2:
+#             data_splits = trainval_split(x=None,
+#                                          y=y,
+#                                          val_train_split=splits[-1],
+#                                          random_state=seed,
+#                                          stratify=stratify)
 
-        else:
-            data_splits = trainvaltest_split(x=None,
-                                             y=y,
-                                             splits=splits,
-                                             random_state=seed,
-                                             stratify=stratify)
+#         else:
+#             data_splits = trainvaltest_split(x=None,
+#                                              y=y,
+#                                              splits=splits,
+#                                              random_state=seed,
+#                                              stratify=stratify)
 
-        dataset_splits={}
-        for split, (split_idx, split_y) in data_splits.items():
-            print(split, len(split_idx))
-            dataset_splits[split] = data.filter(indices=split_idx, subset_key=split)
+#         dataset_splits={}
+#         for split, (split_idx, split_y) in data_splits.items():
+#             print(split, len(split_idx))
+#             dataset_splits[split] = data.filter(indices=split_idx, subset_key=split)
         
         
-        label_encoder = LabelEncoder()
-        label_encoder.fit(dataset_splits["train"].targets)
+#         label_encoder = LabelEncoder()
+#         label_encoder.fit(dataset_splits["train"].targets)
         
-        for d in [*list(dataset_splits.values()), data]:
-            d.label_encoder = label_encoder
-        return dataset_splits
+#         for d in [*list(dataset_splits.values()), data]:
+#             d.label_encoder = label_encoder
+#         return dataset_splits
 
 
 

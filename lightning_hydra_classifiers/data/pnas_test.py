@@ -4,11 +4,14 @@ tests for pnas.py
 
 Created by: Tuesday May 4th, 2021
 Author: Jacob A Rose
+
+
+DEPRECATED: Thursday Sept 2, 2021
 """
 
 
-from contrastive_learning.data.pytorch.pnas import PNASLightningDataModule, PNASLeavesDataset
-from contrastive_learning.data.pytorch.common import DataStageError, TrainValSplitDataset
+# from contrastive_learning.data.pytorch.pnas import PNASLightningDataModule, PNASLeavesDataset
+# from contrastive_learning.data.pytorch.common import DataStageError, TrainValSplitDataset
 
 
 
@@ -73,11 +76,11 @@ class TestPNASLightningDataModule:
         
         
         
-if __name__ == "__main__":
+# if __name__ == "__main__":
     
-    test = TestPNASLightningDataModule()
+#     test = TestPNASLightningDataModule()
     
-    test.run()
+#     test.run()
     
-    from rich import print
-    print(f'[100% SUCCESS] : {__file__}')
+#     from rich import print
+#     print(f'[100% SUCCESS] : {__file__}')

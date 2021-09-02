@@ -25,8 +25,9 @@ from lightning_hydra_classifiers.utils.plot_utils import colorbar
 log = template_utils.get_logger(__name__)
 
 
-__all__ = ["LabelEncoder", "trainval_split", "trainvaltest_split", "plot_split_distributions", "plot_class_distributions",
-           "filter_df_by_threshold", "compute_class_counts"]
+__all__ = ["LabelEncoder", "trainval_split", "trainvaltest_split", "DataSplitter",
+           "plot_split_distributions", "plot_class_distributions", "filter_df_by_threshold",
+           "compute_class_counts"]
 
 
 class LabelEncoder(object):
@@ -54,25 +55,7 @@ class LabelEncoder(object):
     @property
     def classes(self):
         return [k for k in self.class2idx.keys() if k not in self.replacements.keys()]
-    
-#     def replace_class2idx_items(self):
-#         """
-#         Update inplace self.class2idx mappings, so that any class labels in self.replacements.keys()
-#         map to the same int label as their corresponding value in self.replacements.values().
-        
-#         """
-#         if (len(self.replacements) == 0) \
-#         or (len([k for k in self.replacements.keys() if k in self.class2idx.keys()]) == 0):
-#             # No-op if replacements keys are empty or have zero overlap with class2idx keys.
-#             return
-        
-#         if self.verbose:
-#             log.info(f'LabelEncoder replacing {len(self.replacements.keys())} class encodings with that other an another class')
-#             log.info('Replacing: ' + str({k:v for k,v in self.replacements.items() if k in self.class2idx}))
-#         for old, new in self.replacements.items():
-#             if old in list(self.class2idx.keys()):
-#                 self.class2idx[old] = self.class2idx[new]
-        
+
     def __len__(self):
         return len(self.idx2class)
 
@@ -152,116 +135,6 @@ class LabelEncoder(object):
 
 #################################
 #################################
-# class LabelEncoder(object):
-    
-#     """Label encoder for tag labels."""
-#     def __init__(self,
-#                  class2idx: Dict[str,int]=None,
-#                  replace: Optional[Dict[str,str]]=None):
-#         self.class2idx = class2idx or {}
-#         self.replace = replace or {}
-#         self.index2class = {v: k for k, v in self.class2idx.items()}
-#         self.classes = [k for k in self.class2idx.keys() if k not in self.replace.keys()]
-        
-#         self.num_samples = 0
-#         self.verbose=False
-#         self.replace_class2idx_items()
-
-        
-#     def replace_class2idx_items(self):
-#         if (len(self.replace) == 0) \
-#         or (len([k for k in self.replace.keys() if k in self.class2idx.keys()]) == 0):
-#             return
-#         if self.verbose:
-#             log.info(f'LabelEncoder replacing {len(self.replace.keys())} class encodings with that other an another class')
-#             log.info('Replacing: ' + str({k:v for k,v in self.replace.items() if k in self.class2idx}))
-#         for old, new in self.replace.items():
-#             if old in list(self.class2idx.keys()):
-#                 self.class2idx[old] = self.class2idx[new]
-#         self.index2class = {v: k for k, v in self.class2idx.items()}
-#         self.classes = [k for k in self.class2idx.keys() if k not in self.replace.keys()]                
-        
-#     def __len__(self):
-#         return len(self.index2class)
-# #         return len(self.classes)
-
-#     def __str__(self):
-#         msg = f"<LabelEncoder(num_classes={len(self)})>"
-#         if len(self.replace) > 0:
-#             msg += "\n" + f"<num_replaced_classes={len(self.replace)}>"
-#         return msg
-
-#     def fit(self, y):
-# #         from IPython.core.debugger import set_trace
-# #         set_trace()
-        
-#         counts = collections.Counter(y)
-#         self.num_samples += sum(counts.values())
-        
-#         classes = list(counts.keys())
-
-#         old_num_classes = len(self)
-#         new_classes = sorted([label for label in classes if label not in self.classes])
-        
-#         for i, label in enumerate(new_classes):
-#             self.class2idx[label] = old_num_classes + i
-#         self.index2class = {v: k for k, v in self.class2idx.items()}
-        
-#         self.classes = [k for k in self.class2idx.keys() if k not in self.replace.keys()]        
-#         self.replace_class2idx_items()
-
-#         new_classes = [c for c in new_classes if c not in self.replace.keys()]
-#         if len(new_classes):
-#             log.debug(f"[FITTING] {len(y)} samples with {len(classes)} classes, adding {len(new_classes)} new class labels. Latest num_classes = {len(self)}")
-#         assert len(self) == (old_num_classes + len(new_classes))
-#         return self
-
-#     def encode(self, y):
-#         if not hasattr(y,"__len__"):
-#             y = [y]
-# #         print(self.class2idx)
-#         return np.array([self.class2idx[label] for label in y])
-
-#     def decode(self, y):
-#         if not hasattr(y,"__len__"):
-#             y = [y]
-#         return np.array([self.index2class[label] for label in y])
-
-#     def save(self, fp):
-#         with open(fp, "w") as fp:
-#             contents = self.getstate() # {"class2idx": self.class2idx}
-#             json.dump(contents, fp, indent=4, sort_keys=False)
-
-#     @classmethod
-#     def load(cls, fp):
-#         with open(fp, "r") as fp:
-#             kwargs = json.load(fp=fp)
-#         return cls(**kwargs)
-    
-#     def getstate(self):
-#         return {"class2idx": self.class2idx,
-#                 "replace": self.replace}
-    
-#     def __repr__(self):
-#         disp = f"""<{str(type(self)).strip("'>").split('.')[-1]}>:\n"""
-#         disp += f"    num_classes: {len(self)}\n"
-#         disp += f"    fit on num_samples: {self.num_samples}"
-#         return disp
-        
-#     def encode(self, y):
-#         y_one_hot = np.zeros((len(y), len(self.class2idx)), dtype=int)
-#         for i, item in enumerate(y):
-#             for class_ in item:
-#                 y_one_hot[i][self.class2idx[class_]] = 1
-#         return y_one_hot
-
-#     def decode(self, y):
-#         classes = []
-#         for i, item in enumerate(y):
-#             indices = np.where(item == 1)[0]
-#             classes.append([self.index2class[index] for index in indices])
-#         return classes
-
 ####################################################
 
 
@@ -324,11 +197,6 @@ def trainval_split(x: Union[List[Any],np.ndarray]=None,
     
     return {"train":(x_train, y_train),
             "val":(x_val, y_val)}
-
-
-
-
-
 
 
 
@@ -409,6 +277,64 @@ def trainvaltest_split(x: Union[List[Any],np.ndarray]=None,
     return {"train":(x_train, y_train),
             "val":(x_val, y_val),
             "test":(x_test, y_test)}
+
+
+#############################################################
+#############################################################
+
+
+class DataSplitter:
+
+    @classmethod
+    def create_trainvaltest_splits(cls,
+                                   data: torchdata.Dataset,
+                                   val_split: float=0.2,
+                                   test_split: Optional[Union[str, float]]=None, #0.3,
+                                   shuffle: bool=True,
+                                   seed: int=3654,
+                                   stratify: bool=True,
+                                   plot_distributions: bool=False) -> Tuple["FossilDataset"]:
+        
+        if (test_split == "test") or (test_split is None):
+            train_split = 1 - val_split
+            if hasattr(data, f"test_dataset"):
+                data = getattr(data, f"train_dataset")            
+        elif isinstance(test_split, float):
+            train_split = 1 - (test_split + val_split)
+        else:
+            raise ValueError(f"Invalid split arguments: val_train_split={val_train_split}, test_split={test_split}")
+
+
+        splits=(train_split, val_split, test_split)
+        splits = list(filter(lambda x: isinstance(x, float), splits))
+        y = data.targets
+
+        if len(splits)==2:
+            data_splits = trainval_split(x=None,
+                                         y=y,
+                                         val_train_split=splits[-1],
+                                         random_state=seed,
+                                         stratify=stratify)
+
+        else:
+            data_splits = trainvaltest_split(x=None,
+                                             y=y,
+                                             splits=splits,
+                                             random_state=seed,
+                                             stratify=stratify)
+
+        dataset_splits={}
+        for split, (split_idx, split_y) in data_splits.items():
+            print(split, len(split_idx))
+            dataset_splits[split] = data.filter(indices=split_idx, subset_key=split)
+        
+        
+        label_encoder = LabelEncoder()
+        label_encoder.fit(dataset_splits["train"].targets)
+        
+        for d in [*list(dataset_splits.values()), data]:
+            d.label_encoder = label_encoder
+        return dataset_splits
 
 
 #############################################################
@@ -518,31 +444,6 @@ def plot_split_distributions(data_splits: Dict[str, "CommonDataset"]):
 #############################################################
 
 
-# def plot_trainvaltest_splits(train_data,
-#                              val_data,
-#                              test_data):
-#     """
-#     Create 3 vertically-stacked count plots of train, val, and test dataset class label distributions
-#     """
-#     fig, ax = plt.subplots(3, 1, figsize=(16,8*3))
-
-#     train_counts = plot_class_distributions(targets=train_data.targets, sort_by=True, ax = ax[0], xticklabels=False)
-#     plt.gca().set_title(f"train (n={len(train_data)})", fontsize='large')
-#     sort_classes = train_counts.keys()
-
-#     val_counts = plot_class_distributions(targets=val_data.targets, ax = ax[1], sort_by=sort_classes, xticklabels=False)
-#     plt.gca().set_title(f"val (n={len(val_data)})", fontsize='large')
-#     test_counts = plot_class_distributions(targets=test_data.targets, ax = ax[2], sort_by=sort_classes)
-#     plt.gca().set_title(f"test (n={len(test_data)})", fontsize='large')
-
-#     num_samples = len(train_data) + len(val_data) + len(test_data)
-    
-#     plt.suptitle(f"Train-Val-Test_splits (total={num_samples})", fontsize='x-large')
-
-#     plt.subplots_adjust(bottom=0.1, top=0.95, wspace=None, hspace=0.07)
-    
-#     return fig, ax
-
 
 #############################################################
 #############################################################
@@ -608,69 +509,6 @@ def compute_class_counts(targets: Sequence,
 
 #############################################################
 #############################################################
-
-
-# import os
-# import importlib
-# from collections import defaultdict
-
-
-# from 
-
-# class RegistryError(ValueError):
-#     pass
-
-
-
-
-# class Registry:
-#     _available = defaultdict(dict)
-#     _defaults = dict()
-#     _option_functions = []
-
-#     @staticmethod
-#     def add(namespace, name, cls):
-#         Registry._available[namespace][name] = cls
-
-#     @staticmethod
-#     def keys(namespace):
-#         return list(Registry._available[namespace].keys())
-
-#     @staticmethod
-#     def get(namespace, name):
-#         return Registry._available[namespace].get(name)
-
-#     @staticmethod
-#     def set_default(namespace, name):
-#         if namespace in Registry._defaults:
-#             raise RegistryError(f'namespace {namespace} already has a default: {Registry._defaults[namespace]}')
-#         Registry._defaults[namespace] = name
-
-#     @staticmethod
-#     def default(namespace):
-#         return Registry._defaults.get(namespace)
-
-#     @staticmethod
-#     def add_option_function(f):
-#         Registry._option_functions.append(f)
-
-#     @staticmethod
-#     def option_functions():
-#         return list(Registry._option_functions)
-
-# def register(namespace, name, default=False):
-#     def inner(cls):
-#         Registry.add(namespace, name, cls)
-#         if default:
-#             Registry.set_default(namespace, name)
-#         return cls
-
-#     return inner
-
-# def with_option_parser(f):
-#     Registry.add_option_function(f)
-
-
 ############################################################
 ############################################################
 
