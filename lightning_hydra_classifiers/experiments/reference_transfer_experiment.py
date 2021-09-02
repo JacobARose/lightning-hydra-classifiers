@@ -30,7 +30,7 @@ from pathlib import Path
 
 
 from lightning_hydra_classifiers.data.utils.make_catalogs import CSV_CATALOG_DIR_V1_0, EXPERIMENTAL_DATASETS_DIR, CSVDatasetConfig, CSVDataset, DataSplitter
-
+from lightning_hydra_classifiers.utils.common_utils import LabelEncoder
 
 
 
@@ -43,17 +43,17 @@ from torch import nn
 from torch.utils.data import DataLoader, random_split
 
 import pytorch_lightning as pl
-from torchvision.datasets import MNIST
+from torchvision.datasets import CIFAR10
 from torchvision import transforms
 import os
-
+from typing import *
 
 # Replace default file cloud urls from Yann Lecun's website to offiial aws s3 bucket
-new_mirror = 'https://ossci-datasets.s3.amazonaws.com/mnist'
-MNIST.resources = [
-                   ('/'.join([new_mirror, url.split('/')[-1]]), md5)
-                   for url, md5 in MNIST.resources
-                   ]
+# new_mirror = 'https://ossci-datasets.s3.amazonaws.com/mnist'
+# MNIST.resources = [
+#                    ('/'.join([new_mirror, url.split('/')[-1]]), md5)
+#                    for url, md5 in MNIST.resources
+#                    ]
 
 
 if 'TOY_DATA_DIR' not in os.environ: 
@@ -84,7 +84,39 @@ default_root_dir = os.environ['TOY_DATA_DIR']
 #         self.eager_encode_targets = eager_encode_targets
 #         self.setup(samples_df=samples_df)        
 
+
+
+class Subset(torch.utils.data.dataset.Subset):
+    """
+    Subclass that fixes the issue where train and val subset datasets are incapable of using different transforms.
     
+    """
+    def __init__(self,
+                 subset: torch.utils.data.dataset.Subset,
+                 transform=None,
+                 target_transform=None) -> None:
+        super().__init__(dataset=subset.dataset, indices=subset.indices)
+        self.transform = transform
+        self.target_transform = target_transform
+
+        
+    def __getitem__(self, index: int) -> Tuple[Any, Any]:
+        """
+        Args:
+            index (int): Index
+
+        Returns:
+            tuple: (image, target) where target is index of the target class.
+        """
+        img, target = super().__getitem__(index)
+        if self.transform is not None:
+            img = self.transform(img)
+
+        if self.target_transform is not None:
+            target = self.target_transform(target)
+
+        return img, target
+
         
     
     
@@ -135,12 +167,12 @@ class CIFAR10DataModule(pl.LightningDataModule):
         # we set up only relevant datasets when stage is specified
         if stage == 'fit' or stage is None:
             cifar10 = CIFAR10(self.data_dir, train=True, transform=None)
-            self.train_dataset, self.val_dataset = random_split(cifar10, [55000, 5000])
-            self.train_dataset.transform = self.train_transform
-            self.val_dataset.transform = self.val_transform
+            self.train_dataset, self.val_dataset = random_split(cifar10, [45000, 5000])
+            self.train_dataset = Subset(self.train_dataset, transform=self.train_transform)
+            self.val_dataset = Subset(self.val_dataset, transform=self.val_transform)
             
-            self.classes = self.train_dataset.classes
-            self.label_encoder = LabelEncoder(class2idx=self.train_dataset.class_to_idx)
+            self.classes = cifar10.classes
+            self.label_encoder = LabelEncoder(class2idx=cifar10.class_to_idx)
             self.num_classes = len(self.label_encoder)
 
         if stage == 'test' or stage is None:

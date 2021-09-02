@@ -48,6 +48,7 @@ import argparse
 import json
 
 from lightning_hydra_classifiers.data.utils.make_catalogs import *
+from lightning_hydra_classifiers.utils.dataset_management_utils import Extract
 from lightning_hydra_classifiers.utils.metric_utils import get_per_class_metrics, get_scalar_metrics
 from lightning_hydra_classifiers.utils.logging_utils import get_wandb_logger
 import wandb
@@ -166,17 +167,21 @@ class PlantDataModule(pl.LightningDataModule):
 
 class LitMultiTaskModule(pl.LightningModule):
     
-    def __init__(self, config):
+    def __init__(self, config, ckpt_path: Optional[str]=None):
         super().__init__()
-        self.config = config
+        self.config = Munch(config)
         self.lr = config.lr
         self.num_classes = config.num_classes
-        self.save_hyperparameters()
+        self.save_hyperparameters({"config":dict(config)})
         
         self.init_model(config)
         self.metrics = self.init_metrics(stage='all')
         self.criterion = nn.CrossEntropyLoss()        
 
+    def update_config(self, config):
+        self.config.update(Munch(config))
+        self.hparams.config.update(Munch(config))
+        
     def forward(self, x, *args, **kwargs):
         return self.model(x)
 
@@ -196,8 +201,8 @@ class LitMultiTaskModule(pl.LightningModule):
         scores = self.metrics_train(output, target)
         self.log_dict({"train_loss": loss, 'lr': self.optimizer.param_groups[0]['lr']},
                       on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        self.log_dict(scores,
-                      on_step=False, on_epoch=True, prog_bar=True, logger=True)
+        self.log_dict(self.metrics_train, #scores,
+                 on_step=False, on_epoch=True, prog_bar=True, logger=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -206,23 +211,33 @@ class LitMultiTaskModule(pl.LightningModule):
         output = self.model(image)
         loss = self.criterion(output, target)
 #         scores = self.metrics_val(output.argmax(1), target)
+#         try:
         scores = self.metrics_val(output, target)
+#         except ValueError as e:
+        
         y_pred = torch.argmax(output, dim=-1)
         
         self.log("val_loss", loss,
                   on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        self.log_dict(scores,
-                      on_step=False, on_epoch=True, prog_bar=True, logger=True)
         
-        return {"loss":loss.cpu().numpy(),
-                "y_logit":output,#.cpu().numpy(),
-                "y_pred":y_pred}#.cpu().numpy()}
+        self.log("val_acc", self.metrics_val["val/acc_top1"],
+                 on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log_dict({k:v for k,v in self.metrics_val.items() if k != "val/acc_top1"},
+                 on_step=False, on_epoch=True, prog_bar=True, logger=True)
+#         self.log_dict(scores,
+#                       on_step=False, on_epoch=True, prog_bar=True, logger=True)
+        
+        return {"loss":loss, #.cpu().numpy(),
+                "y_logit":output, #.cpu().numpy(),
+                "y_pred":y_pred} #.cpu().numpy()}
     
     
     def init_model(self, config):
         self.model =  backbone.build_model(model_name=config.model_name,
                                            pretrained=config.pretrained,
                                            num_classes=config.num_classes)
+#         if os.path.isfile(self.ckpt_path):
+            
         
         self.freeze_up_to(layer=config.init_freeze_up_to)
         
@@ -234,15 +249,21 @@ class LitMultiTaskModule(pl.LightningModule):
             if layer < 0:
                 layer = len(list(self.model.parameters())) + layer
             
-        self.model.enable_grad = True
+#         self.model.enable_grad = True
+        self.model.requires_grad = True
         for i, (name, param) in enumerate(self.model.named_parameters()):
-            param.enable_grad = False
+            
             if isinstance(layer, int):
                 if layer == i:
                     break
             elif isinstance(layer, str):
-                if layer == name:
+                if layer in name:
                     break
+            param.requires_grad = False
+                    
+#         print(f"Validating model's layer freezing function, model.freeze_up_to(layer={layer})")
+#         for i, (name, param) in enumerate(self.model.named_parameters()):
+#             print(f"{name}.requires_grad: {param.requires_grad}")
 
         
         
@@ -272,76 +293,191 @@ class ImagePredictionLogger(pl.Callback):
         self.bottom_k_per_batch = bottom_k_per_batch
 #         self.num_samples = num_samples
 #         self.val_imgs, self.val_labels = val_samples['image'], val_samples['target']
-        
+
+    def on_sanity_check_start(self, trainer, pl_module):
+        self._sanity_check = True
+
+    def on_sanity_check_end(self, trainer, pl_module):
+        self._sanity_check = False
+    
         
     def on_validation_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx):
-        if "loss" not in outputs:
+        if ("loss" not in outputs) or self._sanity_check:
             return
         
 #         loss = outputs["loss"]
         y_true = batch[1]
         loss = nn.CrossEntropyLoss(reduction="none")(outputs["y_logit"], y_true).cpu().numpy()
-
     
         y_pred = [pl_module.label_encoder.idx2class[i] for i in outputs["y_pred"].cpu().numpy()]
-#         print(type(batch[0]))
         imgs = np.transpose(batch[0].cpu().numpy(), (0,2,3,1))
-#         print(type(imgs))
         labels = [pl_module.label_encoder.idx2class[i] for i in batch[1].cpu().numpy()]
         probs = outputs["y_logit"].softmax(dim=1).cpu().numpy().tolist()
 
-        
-#         print(type(imgs[0]))
-#         print(f"loss: {loss}")
         sorted_idx = np.argsort(loss)#.cpu().numpy())
         top_k_idx = sorted_idx[:self.top_k_per_batch]
         bottom_k_idx = sorted_idx[::-1][:self.bottom_k_per_batch]
         top_k = len(top_k_idx)
-#         print(len(sorted_idx), type(sorted_idx))
-        print(f'Logging top & bottom top_k_idx={top_k_idx} samples.')
-#         print(f"imgs.shape={imgs.shape}, y_pred[0]={y_pred[0]}, labels[0]:{labels[0]}")
-        print(f"len(probs[0]): {len(probs[0])}")
-        trainer.logger.experiment.log({
-            f"bottom_{top_k}_per_batch":
+
+        trainer.logger.experiment.log({"epoch":trainer.current_epoch,
+                                       **{f"bottom_k_per_batch":
                                     wandb.Image(imgs[k,:,:,:], caption=f"Pred:{y_pred[k]}, Label:{labels[k]}, prob: {np.max(probs[k]):.4f}, loss:{loss[k]:.4f}")
-                                    for k in bottom_k_idx
-            }, commit=False)
+                                    for k in bottom_k_idx}
+                                      }, commit=False)
 
-        trainer.logger.experiment.log({
-            f"top_{top_k}_per_batch":
+        trainer.logger.experiment.log({"epoch":trainer.current_epoch,
+                                       **{f"top_k_per_batch":
                                     wandb.Image(imgs[k,:,:,:], caption=f"Pred:{y_pred[k]}, Label:{labels[k]}, prob: {np.max(probs[k]):.4f}, loss:{loss[k]:.4f}") 
-                                    for k in top_k_idx
+                                    for k in top_k_idx}
+                                      }, commit=False)
+
+
+
+
+########################################################
+########################################################
+########################################################
+
+
+def run_lr_tuner(trainer,
+                 model,
+                 datamodule,
+                 config: argparse.Namespace,
+                 run=None):
+    """
+    Learning rate tuner
+    
+    Adapted and refactored from "lightning-hydra-classifiers/lightning_hydra_classifiers/scripts/train_basic.py"
+    """
+#     pipeline_stage = str(pipeline_stage)
+#     stage_config = config.wandb[pipeline_stage]
+
+#     if not config.tuner.trainer_kwargs.auto_lr_find:
+#         print(f'config.trainer.auto_lr_find is set to False, Skipping `run_lr_tuner(config, pipeline_stage={pipeline_stage})`')
+#         print(f'Proceeding with:\n')
+#         print(f'Learning rate = {config.model.lr:.3e}')
+#         print(f'Batch size = {config.model.batch_size}')
+        
+#         return config.model.lr, None, config
+
+    if os.path.isfile(config.lr_finder_results_path): #Path(config.experiment_dir,"lr_finder","hparams.yaml")):# and not config.tuner.options.lr.force_rerun:
+        
+        best_hparams = Extract.config_from_yaml(config.lr_finder_results_path)
             
-#                                     wandb.Image(x, caption=f"Pred:{pred}, Label:{y}") 
-#                                     for x, pred, y in zip(imgs[top_k_idx], 
-#                                                           y_pred[top_k_idx], 
-#                                                           labels[top_k_idx])
-            }, commit=False)
+        best_lr = best_hparams['lr']
+        config.model.lr = best_lr
+        assert config.model.lr == best_lr
 
-
-        
-        
-#         logits = pl_module(val_imgs)
-#         preds = torch.argmax(logits, -1)
-#         # Log the images as wandb Image
-#         trainer.logger.experiment.log({
-#             "examples":[wandb.Image(x, caption=f"Pred:{pred}, Label:{y}") 
-#                            for x, pred, y in zip(val_imgs[:self.num_samples], 
-#                                                  preds[:self.num_samples], 
-#                                                  val_labels[:self.num_samples])]
-#             }, commit=False)
-        
-            
-            
-        
-
-
-def train_source_task(config: argparse.Namespace):
+        print(f'[FOUND] Previously completed trial. Results located in file:\n`{config.lr_finder_results_path}`')
+        print(f'[LOADING] Previous results + avoiding repetition of tuning procedure.')
+        print(f'Proceeding with learning rate, lr = {config.model.lr:.3e}')
+        print('Model hparams =')
+        pp(best_hparams)
+        return config.model.lr, None, config
     
     
-    pl.seed_everything(config['seed'])
+#     os.environ["WANDB_PROJECT"] = stage_config.init.project
+#     run = wandb.init(entity=stage_config.init.entity,
+#                      project=stage_config.init.project,
+#                      job_type=stage_config.init.job_type,
+#                      group=stage_config.init.group,
+#                      dir=stage_config.init.run_dir,
+#                      config=OmegaConf.to_container(stage_config.init.config, resolve=True))
 
-    # ## DataModule
+#     datamodule, data_artifact = fetch_datamodule_from_dataset_artifact(dataset_config=config.datamodule,
+#                                                                        artifact_config=config.artifacts.input_dataset_artifact,
+#                                                                        run_or_api=run)
+#     config.model.num_classes = len(datamodule.classes)
+    # assert (num_classes == 19) | (num_classes == 179)
+    ########################################
+    ########################################
+#     model, model_artifact = build_and_log_model_to_artifact(model_config=config.model,
+#                                         artifact_config=config.artifacts.input_model_artifact,
+#                                         run_or_api=run)
+
+#     model, model_artifact = use_model_artifact(artifact_config=config.artifacts.input_model_artifact,
+#                                                model_config=config.model,
+#                                                run_or_api=run)
+
+
+#     trainer = configure_trainer(config)
+    
+    try:
+        if ("batch_size" not in model.hparams) or (model.hparams.batch_size is None):
+            model.hparams.batch_size = config.data.batch_size
+#         model.hparams = OmegaConf.create(model.hparams) #, resolve=True)
+        print('Continuing with model.hparams:', model.hparams)
+    except Exception as e:
+        print(e)
+        print('conversion from Omegaconf failed', model.hparams)
+        print('continuing')    
+    
+    lr_tuner = trainer.tuner.lr_find(model, datamodule)#, **config.tuner.tuner_kwargs.lr)
+
+    # TODO: pickle lr_tuner object
+    lr_tuner_results = lr_tuner.results
+    best_lr = lr_tuner.suggestion()
+    
+    suggestion = {"lr": best_lr,
+                  "loss":lr_tuner_results['loss'][lr_tuner._optimal_idx]}
+
+    model.hparams.lr = suggestion["lr"]
+#     config.model.optimizer.lr = model.hparams.lr
+    config.model.lr = model.hparams.lr
+#     run.config.update(config, allow_val_change=True)
+    
+        
+    best_hparams = DictConfig({"optimized_hparam_key": "lr",
+                               "lr":best_lr,
+                               "batch_size":config.data.batch_size})
+#                                   "input_shape": model.hparams.input_shape,
+#                                   "image_size":config.datamodule.image_size})
+    
+#     results_dir = Path(config.experiment_dir, "lr_finder")
+    results_dir = Path(config.lr_finder_results_path).parent
+    os.makedirs(results_dir, exist_ok=True)
+    Extract.config2yaml(best_hparams, config.lr_finder_results_path)
+    print(f'Saved best lr value (along w/ batch_size, image_size) to file located at: {str(config.lr_finder_results_path)}') # {str(results_dir / "hparams.yaml")}')
+    print(f'File contents expected to contain: \n{dict(best_hparams)}')
+    
+        
+    fig = lr_tuner.plot(suggest=True)
+    plot_fname = 'lr_tuner_results_loss-vs-lr.png'
+    plot_path = results_dir / plot_fname
+    plt.suptitle(f"Suggested lr={best_lr:.4e} |\n| Searched {lr_tuner.num_training} lr values $\in$ [{lr_tuner.lr_min},{lr_tuner.lr_max}] |\n| bsz = {config.data.batch_size}")
+    plt.tight_layout()
+    plt.savefig(plot_path)
+    if run is not None:
+#         run.summary['lr_finder/plot'] = wandb.Image(fig, caption=plot_fname)
+        run.summary['lr_finder/plot'] = wandb.Image(str(plot_path), caption=plot_fname)
+        run.summary['lr_finder/best/loss'] = suggestion["loss"]
+        run.summary['lr_finder/best/lr'] = suggestion["lr"]
+        run.summary['lr_finder/batch_size'] = config.data.batch_size
+        run.summary['image_size'] = config.data.image_size
+        run.summary['lr_finder/results'] = dict(best_hparams)
+
+#     run.finish()
+    
+    
+    print(f'FINISHED: `run_lr_tuner(config)`')
+    print(f'Proceeding with:\n')
+    print(f'Learning rate = {config.model.lr:.3e}')
+    print(f'Batch size = {config.data.batch_size}')
+    
+#     del datamodule
+#     del model
+#     del trainer
+    
+    return suggestion, lr_tuner_results, config
+
+
+
+
+
+
+def load_data_and_model(config: argparse.Namespace):
+
+
     if config.debug == True:
         print(f"Debug mode activated, loading CIFAR10 datamodule")
         datamodule = CIFAR10DataModule(batch_size=config.data.batch_size,
@@ -360,60 +496,142 @@ def train_source_task(config: argparse.Namespace):
     datamodule.setup("fit")
     config.model.num_classes = datamodule.num_classes
     pp(config)
-
-    model = LitMultiTaskModule(config.model)
+    
+    if os.path.isfile(str(config.model.ckpt_path)):
+        print(f"Loading from model checkpoint: {str(config.model.ckpt_path)}")
+        model = LitMultiTaskModule.load_from_checkpoint(config.model.ckpt_path, config=config.model)
+    else:
+        if isinstance(config.model.ckpt_path, (str, Path)):
+            print(f"User specified checkpoint path doesn't exist. Best checkpoint produced during training will be copied to that location: {config.model.ckpt_path}")
+        print(f"Instantiating model from scratch with hparams:")
+        print(config.model)
+        model = LitMultiTaskModule(config.model)
     model.label_encoder = datamodule.label_encoder
 
-    # ## Callbacks
-    # Checkpoint
+    return datamodule, model
+
+
+
+
+                    
+        
+
+
+# def train_source_task(config: argparse.Namespace):
+#     pl.seed_everything(config.seed)
+    # ## DataModule
+#     if config.debug == True:
+#         print(f"Debug mode activated, loading CIFAR10 datamodule")
+#         datamodule = CIFAR10DataModule(batch_size=config.data.batch_size,
+#                                        task_id=0,
+#                                        image_size=config.data.image_size,
+#                                        image_buffer_size=config.data.image_buffer_size,
+#                                        num_workers=config.data.num_workers,
+#                                        pin_memory=config.data.pin_memory)
+#     else:
+#         datamodule = PlantDataModule(batch_size=config.data.batch_size,
+#                                      task_id=0,
+#                                      image_size=config.data.image_size,
+#                                      image_buffer_size=config.data.image_buffer_size,
+#                                      num_workers=config.data.num_workers,
+#                                      pin_memory=config.data.pin_memory)
+#     datamodule.setup("fit")
+#     config.model.num_classes = datamodule.num_classes
+#     pp(config)
+    
+#     if os.path.isfile(str(config.model.ckpt_path)):
+#         print(f"Loading from model checkpoint: {str(config.model.ckpt_path)}")
+#         model = LitMultiTaskModule.load_from_checkpoint(config.model.ckpt_path, config=config.model)
+
+#     else:
+#         if isinstance(config.model.ckpt_path, (str, Path)):
+#             print(f"User specified checkpoint path doesn't exist. Best checkpoint produced during training will be copied to that location: {config.model.ckpt_path}")
+#         print(f"Instantiating model from scratch with hparams:")
+#         print(config.model)
+#         model = LitMultiTaskModule(config.model)
+#     model.label_encoder = datamodule.label_encoder
+
+
+def train_source_task(config: argparse.Namespace):
+    pl.seed_everything(config.seed)
+
+    datamodule, model = load_data_and_model(config=config)
+    
+
     k=15
     img_prediction_callback = ImagePredictionLogger(top_k_per_batch=k,
-                                                    bottom_k_per_batch=k)
-    
-    
+                                                    bottom_k_per_batch=k)    
     checkpoint_callback = pl.callbacks.ModelCheckpoint(monitor=config.callbacks.monitor.metric,
                                                        save_top_k=1,
                                                        save_last=True,
-                                                       save_weights_only=True,
-                                                       filename='checkpoint/{epoch:02d}-{val_loss:.4f}-{val_f1:.4f}',
+                                                       dirpath=str(Path(config.model_ckpt_dir, "task_0")),
+                                                       filename='{epoch:02d}-{val_loss:.4f}-{val_acc:.4f}',
                                                        verbose=True,
                                                        mode=config.callbacks.monitor.mode)
     earlystopping = pl.callbacks.EarlyStopping(monitor=config.callbacks.monitor.metric,
                                                patience=3,
                                                mode=config.callbacks.monitor.mode)
-
-    # ## Logger
     wandb_logger = pl.loggers.WandbLogger(entity = "jrose",
                                           project = "image_classification_train",
                                           job_type = "train_supervised",
                                           config=dict(config),
-                                          group=f'{config.model.model_name}',
-                                          dir=config.output_dir)
-
+                                          group=f'{config.model.model_name}_task_0',
+                                          reinit=True,
+                                          dir=config.experiment_dir)
 
     # ## Trainer
     trainer = pl.Trainer(
 #                 limit_train_batches=0.1,
 #                 limit_val_batches=0.1,
-                max_epochs=config.num_epochs,
-                gpus=1,
-    #             accumulate_grad_batches=CONFIG['accum'],
-                precision=config.precision,
+                resume_from_checkpoint=config.trainer.resume_from_checkpoint,
+                max_epochs=config.trainer.num_epochs,
+                gpus=config.trainer.gpus,
+                auto_lr_find=config.stages.lr_tuner,
+                precision=config.trainer.precision,
                 callbacks=[earlystopping,
                            checkpoint_callback,
-                          img_prediction_callback],
-    #                        ImagePredictionLogger(val_samples)],
-    #             checkpoint_callback=checkpoint_callback,
-                overfit_batches=2,
+                           img_prediction_callback],
+#                 overfit_batches=5,
                 logger=wandb_logger,
-                track_grad_norm=2,
+#                 track_grad_norm=2,
                 weights_summary='top')
 
+    if config.debug == True:
+        import pdb; pdb.set_trace()
 
-    # # TRAIN
-    trainer.fit(model, datamodule)
-    wandb.finish() 
+        
+    if config.stages.lr_tuner == True:
+        
+        with wandb.init(entity = "jrose",
+                        project = "image_classification_train",
+                        job_type = "lr_tune",
+                        config=dict(config),
+                        group=f'{config.model.model_name}_task_0',
+                        reinit=True,
+                        dir=config.experiment_dir) as run:
 
+            print(f"[Initiating Stage] lr_tuner")
+            suggestion, lr_tuner_results, config = run_lr_tuner(trainer=trainer,
+                                                                model=model,
+                                                                datamodule=datamodule,
+                                                                config=config,
+                                                                run=run)
+        
+        
+    try:
+        trainer.fit(model, datamodule)
+    except KeyboardInterrupt as e:
+        print("Interruption:", e)
+    finally:
+        print(f"checkpoint_callback.best_model_path: {checkpoint_callback.best_model_path}")
+        print(f"checkpoint_callback.best_model_score: {checkpoint_callback.best_model_score}")
+    
+    
+#     wandb.finish()
+
+    print(f"[Initiating TESTING on task_0]")
+
+    test_results = trainer.test(datamodule=datamodule)
 ######################################
 
 
@@ -425,16 +643,22 @@ def train_source_task(config: argparse.Namespace):
 
 
 
-def cmdline_args():
+def cmdline_args(arg_overrides=None):
     
-    parser = argparse.ArgumentParser(description="")
-    subparsers = parser.add_subparsers()
-
-    p = subparsers.add_parser('', help='model args')
+#     parser = argparse.ArgumentParser(description="")
+#     subparsers = parser.add_subparsers()
+#     p = subparsers.add_parser('', help='model args')
+    p = argparse.ArgumentParser(description="")
     # subparser_one = parser_one.add_subparsers()
     p.add_argument("-o", "--output_dir", dest="output_dir", type=str,
-                   default="/media/data_cifs/projects/prj_fossils/users/jacob/experiments/July2021-Nov2021/experiment_logs",
+                   default="/media/data_cifs/projects/prj_fossils/users/jacob/experiments/July2021-Nov2021/experiment_logs/Transfer_Experiments",
                    help="Output root directory for experiment logs.")
+    p.add_argument("-ckpt", "--load_from_checkpoint", dest="load_from_checkpoint", type=str,
+                   default=None,
+                   help="Attempt to load model weights from checkpoint prior to training. If user desires to also load previous epoch info, use resume_from_checkpoint instead. If pointing to nonexistent file path, will attempt to copy best checkpoint produced by ModelCheckpoint callback to the specified location.")
+    p.add_argument("-resume", "--resume_from_checkpoint", dest="resume_from_checkpoint", type=str,
+                   default=None,
+                   help="Provide a path to checkpoint in order to resume previous training from beginning of the last epoch. This will override --load_from_checkpoint flag.")
     p.add_argument("-e", "--num_epochs", dest="num_epochs", type=int, default=100,
                    help="Number of training epochs")
     p.add_argument("-res", "--image_size", dest="image_size", type=int, default=224,
@@ -453,20 +677,29 @@ def cmdline_args():
                    help="Use pretrained imagenet weights or randomly initialize from scratch.")
     p.add_argument("-lr", "--learning_rate", dest="learning_rate", type=float, default=3e-4,
                    help="Initial learning rate.")
+    p.add_argument("--gpus", dest="gpus", type=int, default=1, nargs="*",
+                   help="Specify number of gpus or specific gpu ids.")
     p.add_argument("-d", "--debug", dest="debug", action="store_true", default=False,
                    help="Flag for activating debug-related settings. Currently limited to switching out datamodule to use CIFAR10")
-    args = parser.parse_args([""])
+    args = p.parse_args(arg_overrides)#[""])
     print("Args:")
     pp(args)
 
     config = Munch({
         "seed":42,
-        "num_epochs": args.num_epochs,
-        "precision": 16,
+#         "num_epochs": args.num_epochs,
+#         "precision": 16,
         "device": torch.device('cuda' if torch.cuda.is_available() else 'cpu'),
-        "output_dir":args.output_dir
+        "output_dir":args.output_dir,
+        "debug":args.debug
     })
 
+    config.trainer = Munch({"precision": 16,
+                            "num_epochs": args.num_epochs,
+                            "gpus": args.gpus,
+                            "resume_from_checkpoint": args.resume_from_checkpoint
+                            })
+    
     config.data = Munch({
         "image_size": args.image_size,
         "image_buffer_size": args.image_buffer_size,
@@ -477,24 +710,59 @@ def cmdline_args():
     
     config.model = Munch({"model_name": args.model_name,
                           "init_freeze_up_to":args.init_freeze_up_to,
-                    "pretrained": args.pretrained,
-                    "lr": args.learning_rate,
-                    "num_classes": None,
-                    "t_max": 20,
-                    "min_lr": 1e-6})
+                          "pretrained": args.pretrained,
+                          "lr": args.learning_rate,
+                          "num_classes": None,
+                          "image_size": args.image_size,
+                          "ckpt_path": args.load_from_checkpoint,
+                          "t_max": 20,
+                          "min_lr": 1e-6})
 
     config.callbacks = Munch({"monitor":
-                              Munch({"metric":"val_loss",
-                                     "mode": "min"})
+                              Munch({"metric":"val_acc",
+                                     "mode": "max"})
+#                               Munch({"metric":"val_loss",
+#                                      "mode": "min"})
                              })
 
+    config.stages = Munch({"lr_tuner":True,
+                           "task_0":None, #Munch(),
+                           "task_1":None})
+    
+    
+    if config.debug:
+        config.stages.task_0 = "CIFAR10"
+    else:
+        config.stages.task_0 = "Extant-PNAS"
+        config.stages.task_1 = "PNAS"
+
+    if config.stages.task_1 is not None:
+        task_tags = config.stages.task_0 + "-to-" + config.stages.task_1
+    else:
+        task_tags = config.stages.task_0
+        
+    if config.model.pretrained in ("imagenet", True):
+        weights_name = "imagenet_weights"
+    else:
+        weights_name = "random_weights"
+        
+    config.experiment_name = "_".join([task_tags, config.model.model_name, weights_name])
+    config.experiment_dir = os.path.join(config.output_dir, config.experiment_name)
+    
+    config.model_ckpt_dir = str(Path(config.experiment_dir,"checkpoints"))
+    config.lr_finder_results_path = str(Path(config.experiment_dir,"lr_finder","hparams.yaml"))
+                      
+                      
+                      
+                      
     return args, config
 
 
 if __name__ == '__main__':
     
     args, config = cmdline_args()
-    os.makedirs(config.output_dir, exist_ok=True)
+    os.makedirs(config.experiment_dir, exist_ok=True)
+#     os.makedirs(config.output_dir, exist_ok=True)
     
     os.environ["CUDA_VISIBLE_DEVICES"] = "0"
     
