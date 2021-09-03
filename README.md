@@ -17,7 +17,7 @@
 
 
 
-![Visualization of the codebase](./images/repo-diagram.svg)
+![Visualization of the codebase](./repo-diagram.svg)
 
 
 
