@@ -7,10 +7,9 @@ Created: Tuesday June 22nd, 2021
 """
 
 # backbones = Registry()
-
-
 from . import resnet
 from . import senet
 from . import efficientnet
 
+from . import backbone
 from .backbone import build_model

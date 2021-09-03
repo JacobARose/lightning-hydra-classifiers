@@ -1,0 +1,22 @@
+
+_target_: lightning_hydra_classifiers.data.common.LeavesLightningDataModule
+
+config:
+    name: '${.dataset.name}'
+    batch_size: 128
+    normalize: true
+    image_size: '${hparams.image_size}'
+    grayscale: true
+    channels: 3
+    num_workers: 0
+    pin_memory: true
+    drop_last: false
+    seed: 9877
+    augment: true
+    shuffle: true
+
+    num_classes: '${.dataset.num_classes}'
+    predict_on_split: "test"
+    debug: '${debug}'
+
+    dataset: ${dataset.config}

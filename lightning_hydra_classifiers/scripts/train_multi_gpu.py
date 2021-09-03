@@ -46,7 +46,6 @@ import rich
 
 import sys
 import logging
-from lightning_hydra_classifiers.utils import template_utils
 import hydra
 from hydra.experimental import compose, initialize_config_dir
 from omegaconf import OmegaConf, DictConfig
@@ -57,6 +56,7 @@ import dotenv
 import hydra
 from omegaconf import DictConfig, OmegaConf
 
+from lightning_hydra_classifiers.utils import template_utils
 from pytorch_lightning import LightningModule, LightningDataModule, Callback, Trainer
 from pytorch_lightning.loggers import LightningLoggerBase
 from pytorch_lightning import seed_everything
@@ -113,11 +113,9 @@ def train(config: DictConfig) -> Optional[float]:
 #     template_utils.init(config)
     
     datamodule, config = configure_datamodule(config)
-    
-    print(dir(datamodule))
-#     print(f'datamodule.num_classes={datamodule.num_classes}')
-#     print(f'datamodule.classes={datamodule.classes}')
-    print(f'config.datamodule.num_classes={config.datamodule.num_classes}')
+    config.hparams.update({"num_classes":datamodule.num_classes,
+                          "classes":datamodule.classes})
+    print(f'config.datamodule.num_classes={config.datamodule.config.num_classes}')
     print(f'config.hparams.num_classes={config.hparams.num_classes}')
     
 #     template_utils.print_config(config, resolve=True)
@@ -171,6 +169,7 @@ def train(config: DictConfig) -> Optional[float]:
         ckpt = trainer.checkpoint_callback.best_model_path
         if os.path.isfile(ckpt):
             model = model.load_from_checkpoint(ckpt)
+            trainer.save_checkpoint(f"{config.log_dir}/best_model.ckpt")
         else:
             log.error(f"Proceeding without loading from checkpoint: {ckpt}")
         
@@ -256,18 +255,31 @@ def read_hydra_config(config_dir: str,
 
 
 def configure_datamodule(config: DictConfig) -> pl.LightningDataModule:
-    log.info(f"Instantiating datamodule <{config.datamodule._target_}>")
-    datamodule: pl.LightningDataModule = hydra.utils.instantiate(config.datamodule)
+#     log.info(f"Instantiating datamodule <{config.datamodule._target_}>")
+#     datamodule: pl.LightningDataModule = hydra.utils.instantiate(config.datamodule)
 
+#     try:
+#         datamodule.setup(stage="fit")
+#         config.hparams.classes = datamodule.classes
+#         config.hparams.num_classes = len(config.hparams.classes)
         
-#     import pdb; pdb.set_trace()
-
+#         print(f'config.hparams.num_classes={config.hparams.num_classes}')
+    from lightning_hydra_classifiers.data.common import LeavesLightningDataModule
+        
     try:
-        datamodule.setup(stage="fit")
+        output_dir = "/media/data/jacob/GitHub/prj_fossils_contrastive/notebooks/Extant_family_10_1024_minus_PNAS_family_100_1024"
+
+#         config = DictConfig({"dataset":
+#                                        {"name":"Extant_family_10_minus_PNAS_family_100_512"}
+#                             })
+        config.dataset.config.name = "Extant_family_10_1024_in_PNAS_family_100_1024"
+        datamodule = LeavesLightningDataModule(config=config, #default_config,
+                                               data_dir=output_dir)
         config.hparams.classes = datamodule.classes
         config.hparams.num_classes = len(config.hparams.classes)
+        config.dataset.config.classes = datamodule.classes
+        config.dataset.config.num_classes = len(config.hparams.classes)
         
-        print(f'config.hparams.num_classes={config.hparams.num_classes}')
     except Exception as e:
         print(e)
         pass

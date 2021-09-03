@@ -1,3 +1,13 @@
+"""
+
+TBD: (DEPRECATE or REFACTOR script to be named wrt the co-tuning classifier, instead of pnas_model.py)
+
+
+Also TODO: Address the use of pytorch lightning methods but only nn.Module subclassing.
+
+"""
+
+
 from typing import Any, List, Optional, Dict
 
 import torch

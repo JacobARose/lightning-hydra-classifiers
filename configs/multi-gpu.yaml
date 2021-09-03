@@ -4,7 +4,9 @@ defaults:
 
     - trainer: ddp_trainer.yaml
     - model: transfer_learning_model.yaml
-    - datamodule: fossil_datamodule.yaml # extant_datamodule.yaml # 
+    - datamodule: standalone_datamodule.yaml #default_datamodule.yaml
+    - dataset: fossil_dataset.yaml
+#     - datamodule: fossil_datamodule.yaml # extant_datamodule.yaml # 
     - callbacks: finetune_callbacks.yaml
     # wandb_callbacks.yaml # default_callbacks.yaml  # set this to null if you don't want to use callbacks
     - logger: many_loggers.yaml
@@ -23,20 +25,19 @@ root_dir: ${oc.env:WANDB_CACHE_DIR}
 work_dir: "/media/data_cifs/projects/prj_fossils/users/jacob/experiments/July2021-Nov2021"
 
 job_dir: "${work_dir}/${job_type}"
-log_dir: "${job_dir}/${now:%Y-%m-%d}/${now:%H-%M}"
-
+log_dir: "${job_dir}/7-15" # ${now:%Y-%m-%d}/${now:%H-%M}"
 results_dir: '${model.model_dir}/results'
 
 # python "/media/data/jacob/GitHub/lightning-hydra-classifiers/configs/multi-gpu.yaml"
 
-optimized_metric: 'val_loss'
+optimized_metric: 'val/loss'
 test_only: false
 #true
 
 seed: 95893
-debug: False
-print_config: True
-disable_warnings: True
+debug: false
+print_config: true
+disable_warnings: true
 
 model:
     model_dir: '${log_dir}/model'
@@ -60,17 +61,21 @@ hparams:
     classes: null
     class_type: "family"
     image_size: 512 #1024
-    dataset: '${datamodule.name}'  # "Extant"
+    dataset: '${dataset.config.name}' # "Fossil" # '${dataset.config.name}'  # "Extant"
     backbone: "resnet50"
+    pretrained: true
+    unfreeze_init: null
     finetune_milestones: [3, 5, 10]
+    unfreeze_curriculum: ['layer4', 'layer3', 'layer2']
 
 
 
-datamodule:
-    batch_size: '${hparams.batch_size}'
-    image_size: '${hparams.image_size}'
-    class_type: '${hparams.class_type}'
-    seed: '${seed}'
+# datamodule:
+#     config:
+#         batch_size: '${hparams.batch_size}'
+#         image_size: '${hparams.image_size}'
+#         class_type: '${hparams.class_type}'
+#         seed: '${seed}'
 
 wandb:
     init:
@@ -81,7 +86,7 @@ wandb:
         run_dir: ${root_dir}
         tags: ['${hparams.dataset}','${hparams.backbone}',"train","supervised","init"]
         reinit: true
-        id: '${job_type}_${now:%Y-%m-%d-%H-%M}'
+#         id: '${job_type}_${now:%Y-%m-%d-%H-%M}'
 #         config:
 #             stage: "train"
 #             stage_idx: "2"
@@ -136,11 +141,11 @@ callbacks:
 
 hydra:
     # output paths for hydra logs
-    run:
-        dir: logs/runs/${now:%Y-%m-%d}/${now:%H-%M-%S}
-    sweep:
-        dir: logs/multiruns/${now:%Y-%m-%d_%H-%M-%S}
-        subdir: ${hydra.job.num}
+#     run:
+#         dir: logs/runs/${now:%Y-%m-%d}/${now:%H-%M-%S}
+#     sweep:
+# #         dir: logs/multiruns/${now:%Y-%m-%d_%H-%M-%S}
+#         subdir: ${hydra.job.num}
 
     job:
         # you can set here environment variables that are universal for all users

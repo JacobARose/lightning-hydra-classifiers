@@ -1,3 +1,9 @@
-from . import callbacks, datamodules, models, utils
+from . import callbacks, models, utils, experiments, scripts
+from .scripts import *
 
-from . import train, train_basic, finetune, train_multi_gpu
+from . import data
+# from . import (train,
+# 			   train_basic,
+# 			   finetune,
+# 			   train_multi_gpu,
+# 			   train_BYOL)

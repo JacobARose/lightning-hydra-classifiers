@@ -5,7 +5,7 @@ Author: Jacob A Rose
 Created: Saturday May 29th, 2021
 
 """
-
+from typing import *
 import torch
 from torch import nn
 import torchmetrics as metrics
@@ -75,8 +75,10 @@ class BaseModule(nn.Module):
 
 
     @classmethod
-    def freeze(cls, model: nn.Module):
-        for param in model.parameters():
+    def freeze(cls, model: nn.Module, up_to_layer: Optional[str]=None):
+        for name, param in model.named_parameters():
+            if name == up_to_layer:
+                break
             param.requires_grad = False
             
     @classmethod
@@ -140,12 +142,12 @@ class BaseModule(nn.Module):
             if f"{state_dict}_state_dict" in checkpoint and part is not None:
                 part.load_state_dict(checkpoint[f"{state_dict}_state_dict"])
 
-    @classmethod
-    def save_checkpoint(self, checkpoint, path):
+    @staticmethod
+    def save_checkpoint(checkpoint, path):
         torch.save(checkpoint, path)
 
-    @classmethod
-    def load_checkpoint(self, path):
+    @staticmethod
+    def load_checkpoint(path):
         checkpoint = torch.load(path, map_location=lambda storage, loc: storage)
         return checkpoint
     
@@ -194,7 +196,23 @@ class BaseLightningModule(pl.LightningModule):
             self.metrics_test = get_scalar_metrics(num_classes=self.num_classes, average='macro', prefix='test')
             self.metrics_test_per_class = get_per_class_metrics(num_classes=self.num_classes, prefix='test')
     
-    
+    def freeze_up_to(self, layer: Union[int, str]=None):
+        
+        if isinstance(layer, int):
+            if layer < 0:
+                layer = len(list(self.model.parameters())) + layer
+            
+        self.model.enable_grad = True
+        for i, (name, param) in enumerate(self.model.named_parameters()):
+            if isinstance(layer, int):
+                if layer == i:
+                    break
+            elif isinstance(layer, str):
+                if layer == name:
+                    break
+            else:
+                param.enable_grad = False
+        
     
     
 
@@ -209,7 +227,7 @@ class BaseLightningModule(pl.LightningModule):
         
         return {'loss':loss,
                 'log':{
-                       'train_loss':loss,
+                       'train/loss':loss,
                         'y_hat':y_hat,
 #                        'y_prob':y_prob,
 #                        'y_pred':y_pred,
@@ -245,7 +263,7 @@ class BaseLightningModule(pl.LightningModule):
                  on_epoch=True,
                  logger=True, 
                  prog_bar=True)
-        self.log('train_loss', loss,
+        self.log('train/loss', loss,
                  on_step=True,# on_epoch=True)#,
                  logger=True, 
                  prog_bar=True
@@ -261,7 +279,7 @@ class BaseLightningModule(pl.LightningModule):
         y_pred = torch.max(y_prob, dim=1)[1]
         return {'loss':loss,
                 'log':{
-                       'val_loss':loss,
+                       'val/loss':loss,
                        'y_hat':y_hat,
 #                        'y_prob':y_prob,
                        'y_pred':y_pred,
@@ -273,7 +291,7 @@ class BaseLightningModule(pl.LightningModule):
     def validation_step_end(self, outputs):
         
         logs = outputs['log']
-        loss = logs['val_loss']
+        loss = logs['val/loss']
 #         y_prob, y_pred, y = logs['y_prob'], logs['y_pred'], logs['y_true']
 #         y_hat = logs['y_hat']        
         y_hat, y = logs['y_hat'], logs['y_true']
@@ -290,7 +308,7 @@ class BaseLightningModule(pl.LightningModule):
 #         print(torch.isclose(y_prob.sum(dim=1), torch.ones_like(y_prob.sum(dim=1))).all())
                 
         self.metrics_val(y_prob, y)
-        self.metrics_val_per_class(y_prob, y)
+#         self.metrics_val_per_class(y_prob, y)
 #         batch_metrics = self.metrics_val(y_pred, y)
 #         breakpoint()
         for k in self.metrics_val.keys():
@@ -302,7 +320,7 @@ class BaseLightningModule(pl.LightningModule):
                      logger=True,
                      prog_bar=prog_bar)
 
-        self.log('val_loss',loss,
+        self.log('val/loss',loss,
                  on_step=False, on_epoch=True,
                  logger=True, prog_bar=True)#,
 #                  sync_dist=True)
@@ -313,59 +331,6 @@ class BaseLightningModule(pl.LightningModule):
         return outputs
 
 
-
-    def validation_epoch_end(self, validation_step_outputs):
-        
-        local_rank = os.environ.get("LOCAL_RANK", 0)
-        print(f'local_rank={local_rank}')
-        if str(local_rank)!="0":
-            print(f'Skipping val/confusion matrix logging on local_rank={local_rank}')
-            return None
-        
-        y_prob, y = [], []
-        for batch in validation_step_outputs:
-            y_prob.extend(batch['y_prob'].cpu().numpy())
-            y.extend(batch['y_true'].cpu().numpy())
-            
-        
-        y_prob=np.stack(y_prob)
-        y=np.stack(y)
-        
-        logger = get_wandb_logger(self.trainer)
-        experiment = logger.experiment
-
-        if experiment:
-            print(y_prob[0].shape)
-            experiment.log({"val/confusion_matrix" : wandb.plot.confusion_matrix(probs=y_prob, #np.concatenate(y_prob,axis=0),
-                                                                                 y_true=y, #np.stack(y),
-                                                                                 class_names=self.classes,
-                                                                                 title="val/confusion_matrix")})#,
-#             else:
-
-#                             "global_step": self.trainer.global_step},
-#                            commit=False)
-        
-#         f1 = self.metrics_val_per_class['val/F1'].compute()
-#         cm = self.metrics_val_per_class['val/ConfusionMatrix'].compute()
-        
-#         class_names = list(range(len(f1)))
-#         if hasattr(self, "classes"):
-#             class_names = self.classes
-#         assert isinstance(class_names, list)
-        
-        
-#         logger = get_wandb_logger(trainer)
-#         experiment = logger.experiment
-        
-        
-#         table = wandb.Table(columns=class_names)
-        
-#         for k,v in validation_step_outputs.items():
-#             v["log"][]
-        
-#         self.metrics_val_per_class.reset()
-        
-    
     def test_step(self, batch, batch_idx):
         x, y = batch[:2]
         y_hat = self(x)
@@ -374,7 +339,7 @@ class BaseLightningModule(pl.LightningModule):
 #         y_pred = torch.max(y_prob, dim=1)[1]
         return {'loss':loss,
                 'log':{
-                       'test_loss':loss,
+                       'test/loss':loss,
                        'y_hat':y_hat,
 #                        'y_prob':y_prob,
 #                        'y_pred':y_pred,
@@ -386,14 +351,13 @@ class BaseLightningModule(pl.LightningModule):
     def test_step_end(self, outputs):
         
         logs = outputs['log']
-        loss = logs['test_loss']
+        loss = logs['test/loss']
 #         y_prob, y_pred, y = logs['y_prob'], logs['y_pred'], logs['y_true']
 #         y_hat = logs['y_hat']        
         y_hat, y = logs['y_hat'], logs['y_true']
 #         print("y_hat.dtype=", y_hat.dtype)
         y_prob = self.probs(y_hat.float())
         y_pred = torch.max(y_prob, dim=1)[1]
-        
         
         self.metrics_test(y_prob, y)
         self.metrics_test_per_class(y_prob, y)
@@ -408,7 +372,7 @@ class BaseLightningModule(pl.LightningModule):
                      logger=True,
                      prog_bar=prog_bar)
 
-        self.log('test_loss',loss,
+        self.log('test/loss',loss,
                  on_step=False, on_epoch=True,
                  logger=True, prog_bar=True)#,
 
@@ -531,45 +495,12 @@ class BaseLightningModule(pl.LightningModule):
 #         )
 #         return loss
 
+
     
     
     
     
     
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-# Inherits from dict
 class Registry(dict):
     '''
     A helper class for managing registering modules, it extends a dictionary

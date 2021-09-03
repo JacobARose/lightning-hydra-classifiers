@@ -1,0 +1,18 @@
+_target_: lightning_hydra_classifiers.data.common.CommonDataset
+
+config:
+    name: "Extant_family_10_512"
+    val_train_split: 0.2
+    test_split: "test"
+    threshold: 10
+    seed: 987485
+    class_type: "family"
+    x_col: "path"
+    y_col: "${.class_type}"
+    id_col: "catalog_number"
+    path_schema: "{family}_{genus}_{species}_{collection}_{catalog_number}"
+    num_classes: null
+    num_samples: null
+    dataset_dirs: null
+
+

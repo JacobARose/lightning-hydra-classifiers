@@ -101,6 +101,14 @@ class Classifier(BaseModule):
             self.head = head
         self.finetune = finetune
 
+    @classmethod    
+    def from_config(cls,
+                    config):
+        return cls(backbone=None,
+                   head=None,
+                   **config)
+        
+        
     @property
     def features_dim(self) -> int:
         """The dimension of features before the final `head` layer"""
