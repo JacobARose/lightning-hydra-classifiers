@@ -11,20 +11,18 @@
 <a href="https://hub.docker.com/r/ashlev/lightning-hydra"><img alt="Docker" src="https://img.shields.io/badge/docker-257bd6?style=for-the-badge&logo=docker&logoColor=white"></a>
 <a href="https://black.readthedocs.io/en/stable/"><img alt="Code style: black" src="https://img.shields.io/badge/code%20style-black-black.svg?style=for-the-badge"></a>
 
-A clean and scalable template to kickstart your deep learning project 🚀⚡🔥<br>
-Click on [<kbd>Use this template</kbd>](https://github.com/ashleve/lightning-hydra-template/generate) to initialize new repository.
-
-*Currently uses dev version of Hydra.<br>Suggestions are always welcome!*
-
 </div>
 <br><br>
 
-<!--
-If you use this template please add <br>
-[![](https://shields.io/badge/-Lightning--Hydra--Template-017F2F?style=flat&logo=github&labelColor=303030)](https://github.com/ashleve/lightning-hydra-template) <br>
-to your `README.md`.
-<br><br>
--->
+
+
+
+![Visualization of the codebase](./images/repo-diagram.svg)
+
+
+
+
+
 
 
 ## Development Notes
