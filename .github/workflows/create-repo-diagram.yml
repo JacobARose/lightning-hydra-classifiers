@@ -14,5 +14,5 @@ jobs:
       - name: Update diagram
         uses: githubocto/repo-visualizer@0.7.1
         with:
-          output_file: "images/repo-diagram.svg"
-          excluded_paths: "ignore,.github"
+          output_file: "repo-diagram.svg"
+          excluded_paths: ".github"
