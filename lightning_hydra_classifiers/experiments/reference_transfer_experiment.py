@@ -27,39 +27,26 @@ import argparse
 from munch import Munch
 import os
 from pathlib import Path
-
-
-from lightning_hydra_classifiers.data.utils.make_catalogs import CSV_CATALOG_DIR_V1_0, EXPERIMENTAL_DATASETS_DIR, CSVDatasetConfig, CSVDataset, DataSplitter
-from lightning_hydra_classifiers.utils.common_utils import LabelEncoder
-
-
-
 import numpy as np
-
-# 🍦 Vanilla PyTorch
 import torch
 from torch.nn import functional as F
 from torch import nn
 from torch.utils.data import DataLoader, random_split
-
 import pytorch_lightning as pl
 from torchvision.datasets import CIFAR10
 from torchvision import transforms
 import os
 from typing import *
 
-# Replace default file cloud urls from Yann Lecun's website to offiial aws s3 bucket
-# new_mirror = 'https://ossci-datasets.s3.amazonaws.com/mnist'
-# MNIST.resources = [
-#                    ('/'.join([new_mirror, url.split('/')[-1]]), md5)
-#                    for url, md5 in MNIST.resources
-#                    ]
 
+from lightning_hydra_classifiers.data.utils.make_catalogs import CSV_CATALOG_DIR_V1_0, EXPERIMENTAL_DATASETS_DIR, CSVDatasetConfig, CSVDataset, DataSplitter
+from lightning_hydra_classifiers.utils.common_utils import LabelEncoder
 
 if 'TOY_DATA_DIR' not in os.environ: 
-    os.environ['TOY_DATA_DIR'] = "/media/data_cifs/projects/prj_fossils/data/toy_data"
-        
+    os.environ['TOY_DATA_DIR'] = "/media/data_cifs/projects/prj_fossils/data/toy_data"        
 default_root_dir = os.environ['TOY_DATA_DIR']
+
+__all__ = ["CIFAR10DataModule"]
 
 
 # class CIFAR10Dataset(torchdata.datasets.Files):

@@ -30,7 +30,7 @@ import argparse
 import shutil
 from copy import deepcopy
 from functools import cached_property
-from lightning_hydra_classifiers.data.common import PathSchema
+# from lightning_hydra_classifiers.data.common import PathSchema
 from lightning_hydra_classifiers.utils.dataset_management_utils import Extract as ExtractBase
 # from lightning_hydra_classifiers.utils.common_utils import LabelEncoder
 from IPython.display import display
@@ -47,612 +47,15 @@ from omegaconf import DictConfig
 import collections
 from PIL import Image
 import torch
-
+import torchdata
 from lightning_hydra_classifiers.data.utils import catalog_registry
+from lightning_hydra_classifiers.data.datasets.common import PathSchema, SampleSchema, CSVDatasetConfig, CSVDataset
 from lightning_hydra_classifiers.utils.common_utils import (DataSplitter,
                                                             LabelEncoder,
                                                             trainval_split,
                                                             trainvaltest_split)
-import torchdata
 
 
-totensor: Callable = torchvision.transforms.ToTensor()
-
-def toPIL(img: torch.Tensor, mode="RGB") -> Callable:
-    return torchvision.transforms.ToPILImage(mode)(img)
-
-
-
-
-class Extract(ExtractBase):
-    
-    
-    @classmethod
-    def export_dataset_state(cls,
-                             output_dir: Union[str, Path],
-                             df: pd.DataFrame=None,
-                             config: DictConfig=None,
-                             encoder: LabelEncoder=None,
-                             dataset_name: Optional[str]="dataset"
-                             ) -> None:
-        
-        paths = {ftype: str(output_dir / str(dataset_name + ext)) for ftype, ext in cls.data_file_ext_maps.items()}
-        
-        output_dir = Path(output_dir)
-        if isinstance(df, pd.DataFrame):
-            cls.df2csv(df = df,
-                       path = paths["df"])
-            if config:
-                config.data_path = paths["df"]
-        if isinstance(encoder, LabelEncoder):
-            cls.labels2json(encoder=encoder,
-                            path = paths["encoder"])
-            if config:
-                config.label_encoder_path = paths["encoder"]
-        if isinstance(config, CSVDatasetConfig):
-            config.save(path = paths["config"])
-#             cls.config2yaml(config=config,
-#                             path = paths["config"])
-            
-            
-    @classmethod
-    def import_dataset_state(cls,
-                             data_dir: Optional[Union[str, Path]]=None,
-                             config_path: Optional[Union[Path, str]]=None,
-                            ) -> Tuple["CSVDataset", "CSVDatasetConfig"]:
-        if (not os.path.exists(str(data_dir))) and (not os.path.exists(config_path)):
-            raise ValueError("Either data_dir or config_path must be existing paths")
-        
-        if os.path.isdir(str(data_dir)):
-            data_dir = Path(data_dir)
-        paths = {}
-        
-        # import config yaml file
-        if os.path.isfile(str(config_path)):
-            paths['config'] = config_path
-#             config = cls.config_from_yaml(path = paths["config"])
-            config = CSVDatasetConfig.load(path = paths["config"])
-            if hasattr(config, "data_path"):
-                paths["df"] = str(config.data_path)
-            if hasattr(config, "label_encoder_path"):
-                paths["encoder"] = str(config.label_encoder_path)
-            data_dir = Path(os.path.dirname(config_path))
-            
-        for ftype, ext in cls.data_file_ext_maps.items():
-            if ftype not in paths:
-                paths[ftype] = str(list(data_dir.glob("*" + ext))[0])
-                
-                
-        config.data_path = str(paths["df"])
-        config.label_encoder_path = str(paths["encoder"])
-        if os.path.isfile(paths["encoder"]):
-            # import label encodings json file if it exists
-            label_encoder = cls.labels_from_json(path = paths["encoder"])
-            
-        # import dataset samples from a csv file as a CustomDataset/CSVDataset object
-        dataset = CSVDataset.from_config(config,
-                                         eager_encode_targets=True)
-        dataset.setup(samples_df=dataset.samples_df,
-                      label_encoder=label_encoder,
-                      fit_targets=True)
-        
-        return dataset, config
-                    
-            
-
-
-
-
-
-@dataclass
-class BaseDatasetConfig:
-
-    def save(self,
-             path: Union[str, Path]) -> None:
-        
-        cfg = asdict(self)
-#         cfg = DictConfig({k: getattr(self,k) for k in self.keys()})
-        Extract.config2yaml(cfg, path)
-    
-    @classmethod
-    def load(cls,
-             path: Union[str, Path]) -> "DatasetConfig":
-
-        cfg = Extract.config_from_yaml(path)
-
-#         keys = cls.__dataclass_fields__.keys()
-        cfg = cls(**{k: cfg[k] for k in cls.keys()})
-        return cfg
-    
-    @classmethod
-    def keys(cls):
-        return cls.__dataclass_fields__.keys()
-    
-    def __repr__(self):
-        out = f"{type(self)}" + "\n"
-        out += "\n".join([f"{k}: {getattr(self, k)}" for k in self.keys()])
-#         out += f"\nroot_dir: {self.root_dir}"
-#         out += "\nsubset_dirs: \n\t" + '\n\t'.join(self.subset_dirs)
-        return out
-
-
-
-
-
-    
-@dataclass
-class DatasetConfig(BaseDatasetConfig):
-    base_dataset_name: str = "Extant_Leaves"
-    class_type: str = "family"
-    threshold: Optional[int] = 10
-    resolution: int = 512
-    version: str = "v1_0"
-    path_schema: str = "{family}_{genus}_{species}_{collection}_{catalog_number}"
-    
-    @property
-    def available_versions(self) -> List[str]:
-        return list(catalog_registry.available_datasets().versions.keys())
-
-    @property
-    def full_name(self) -> str:
-        name  = self.base_dataset_name
-        if self.threshold:
-            name += f"_{self.class_type}_{self.threshold}"
-        name += f"_{self.resolution}"
-        return name
-
-    
-class ImageFileDatasetConfig(DatasetConfig):
-    
-    @property
-    def root_dir(self):
-        return catalog_registry.available_datasets.get(self.full_name, version=self.version)
-    
-    def is_valid_subset(self, subset: str):
-        for s in ("train", "val", "test"):
-            if s in subset:
-                return True
-        return False
-    
-    @property
-    def subsets(self):
-        if isinstance(self.root_dir, list):
-            return []
-        return [s for s in os.listdir(self.root_dir) if self.is_valid_subset(s)]
-    
-    @property
-    def subset_dirs(self):
-        return [os.path.join(self.root_dir, subset) for subset in self.subsets]
-#         subsets = self.subsets
-#         return [os.path.join(self.root_dir, subset) for subset in subsets if self.is_valid_subset(subset)]
-
-    def locate_files(self) -> Dict[str, List[Path]]:
-        return Extract.locate_files(self.root_dir)
-
-
-    @cached_property
-    def num_samples(self):
-#         subset_dirs = {Path(subset_dir).stem: Path(subset_dir) for subset_dir in self.subset_dirs}
-        files = {subset: f for subset, f in self.locate_files().items() if self.is_valid_subset(subset)}
-        return {subset: len(list(f)) for subset, f in files.items()}
-#         return {subset: len(list(subset_dirs[subset].rglob("*/*.jpg"))) for subset in subset_dirs.keys()}
-    
-    
-    def __repr__(self):
-        out = super().__repr__()
-        out += f"\nroot_dir: {self.root_dir}"
-        out += "\nsubsets: "
-        for i, subset in enumerate(self.subsets):
-            out += '\n\t' + f"{subset}:"
-            out += '\n\t\t' + f"subdir: {self.subset_dirs[i]}"
-            out += '\n\t\t' + f"subset_num_samples: {self.num_samples[subset]}"
-        return out
-
-
-@dataclass
-class CSVDatasetConfig(BaseDatasetConfig):
-    
-    full_name: str = None
-    data_path: str = None
-    label_encoder_path: Optional[str] = None
-    subset_key: str = "all"
-    
-    def update(self, **kwargs):
-        if "subset_key" in kwargs:
-            self.subset_key = kwargs["subset_key"]
-        if "num_samples" in kwargs:
-            self.num_samples = {self.subset_key: kwargs["num_samples"]}
-    
-    @cached_property
-    def num_samples(self):
-        return {self.subset_key: len(self.locate_files())}
-
-    def __repr__(self):
-        out = super().__repr__()
-        out += '\n' + f"num_samples: {self.num_samples[self.subset_key]}"
-        return out
-
-    def locate_files(self) -> pd.DataFrame: #Dict[str, List[Path]]:
-        return Extract.df_from_csv(self.data_path)
-    
-    def load_label_encoder(self) -> Union[None, LabelEncoder]:
-        if os.path.exists(str(self.label_encoder_path)):
-            return Extract.labels_from_json(str(self.label_encoder_path))
-        return
-
-    @classmethod
-    def export_dataset_state(cls,
-                             output_dir: Union[str, Path],
-                             df: pd.DataFrame=None,
-                             config: DictConfig=None,
-                             encoder: LabelEncoder=None,
-                             dataset_name: Optional[str]="dataset"
-                             ) -> None:
-        Extract.export_dataset_state(output_dir=output_dir,
-                                     df=df,
-                                     config=config,
-                                     encoder=encoder,
-                                     dataset_name=dataset_name)
-
-            
-    @classmethod
-    def import_dataset_state(cls,
-                             data_dir: Optional[Union[str, Path]]=None,
-                             config_path: Optional[Union[Path, str]]=None,
-                            ) -> Tuple["CSVDataset", "CSVDatasetConfig"]:
-
-        return Extract.import_dataset_state(data_dir=data_dir,
-                                            config_path=config_path)
-
-
-
-
-
-####################################
-####################################
-
-
-
-@dataclass
-class SampleSchema:
-    path : Union[str, Path] = None
-    family : str = None
-    genus : str = None
-    species : str = None
-    collection : str = None
-    catalog_number : str = None
-
-    @classmethod
-    def keys(cls):
-        return list(cls.__dataclass_fields__.keys())
-        
-    def __getitem__(self, index: int):
-        return getattr(self, self.keys()[index])
-                
-        
-class CustomDataset(torchdata.datasets.Files): # (CommonDataset):
-
-    def __init__(self,
-                 files: List[Path]=None,
-                 samples_df: pd.DataFrame=None,
-                 path_schema: Path = "{family}_{genus}_{species}_{collection}_{catalog_number}",
-                 return_signature: List[str] = ["image","target"], #,"path"],
-                 eager_encode_targets: bool = False,
-                 config: Optional[BaseDatasetConfig]=None,
-                 transform=None):
-        files = files or []
-        super().__init__(files=files)
-#         self.samples_df = samples_df
-        self.path_schema = PathSchema(path_schema)
-        self._return_signature = collections.namedtuple("return_signature", return_signature)
-        
-        self.x_col = "path"
-        self.y_col = "family"
-        self.id_col = "catalog_number"
-        self.config = config or {}
-        self.transform = transform
-        self.eager_encode_targets = eager_encode_targets
-        self.setup(samples_df=samples_df)
-        
-        
-    def fetch_item(self, index: int) -> Tuple[str]:
-        sample = self.parse_sample(index)
-        image = Image.open(sample.path)
-        return self.return_signature(image=image,
-                                     target=getattr(sample, self.y_col),
-                                     path=getattr(sample, self.x_col))
-
-    def return_signature(self, **kwargs):
-        return self._return_signature(**{key: kwargs[key] for key in self._return_signature._fields if key in kwargs})    
-    
-    def __getitem__(self, index: int):
-        
-        item = self.fetch_item(index)
-        image, target, path = item.image, item.target, str(getattr(item, "path", None))
-        
-        target = self.label_encoder.class2idx[target]
-        
-        if self.transform is not None:
-#             image = totensor(image)
-            image = self.transform(image)
-#         if self.target_transform is not None:
-#             target = self.target_transform(target)
-
-        if path:
-            return tuple(self.return_signature(image=image, target=target, path=path))
-        return tuple(self.return_signature(image=image, target=target))
-    
-        
-    def setup(self,
-              samples_df: pd.DataFrame=None,
-              label_encoder: LabelEncoder=None,
-              fit_targets: bool=True):
-        """
-        Running setup() should result in the Dataset having assigned values for:
-            self.samples
-            self.targets
-            self.samples_df
-            self.label_encoder
-        
-        """
-        if samples_df is not None:
-            self.samples_df = samples_df.convert_dtypes()
-        self.samples = [self.parse_sample(idx) for idx in range((len(self)))]
-        self.targets = [sample[1] for sample in self.samples]
-        self.samples_df = pd.DataFrame(self.samples).convert_dtypes()
-        
-        self.label_encoder = label_encoder or LabelEncoder()
-        if fit_targets:
-            self.label_encoder.fit(self.targets)
-            
-        if self.eager_encode_targets:
-            self.targets = self.label_encoder.encode(self.targets).tolist()
-        
-    @classmethod
-    def from_config(cls, config: DatasetConfig, subset_keys: List[str]=None) -> "CustomDataset":
-        pass
-        
-    def parse_sample(self, index: int):
-        pass
-    
-    @property
-    def classes(self):
-        return self.label_encoder.classes
-    
-    def __repr__(self):
-        disp = f"""<{str(type(self)).strip("'>").split('.')[1]}>:"""
-        disp += '\n\t' + self.config.__repr__().replace('\n','\n\t')
-#         if len(self):
-#             disp += "\n\t" + f"num_samples: {len(self)}"
-        return disp
-
-    
-    @classmethod
-    def get_files_from_samples(cls,
-                               samples: Union[pd.DataFrame, List],
-                               x_col: Optional[str]="path"):
-        if isinstance(samples, pd.DataFrame):
-            if x_col in samples.columns:
-                files = list(samples[x_col].values)
-            else:
-                files = list(samples.iloc[:,0].values)
-        elif isinstance(samples, list):
-            files = [s[0] for s in self.samples]
-            
-        return files
-    
-    def intersection(self, other, suffixes=("_x","_y")):
-        samples_df = self.samples_df
-        other_df = other.samples_df
-        
-        intersection = samples_df.merge(other_df, how='inner', on=self.id_col, suffixes=suffixes)
-        return intersection
-    
-    def __add__(self, other):
-    
-        intersection = self.intersection(other)[self.id_col].tolist()
-        samples_df = self.samples_df
-        
-        left_union = samples_df[samples_df[self.id_col].apply(lambda x: x in intersection)]
-        
-        return left_union
-    
-    def __sub__(self, other):
-    
-        intersection = self.intersection(other)[self.id_col].tolist()
-        samples_df = self.samples_df
-        
-        remainder = samples_df[samples_df[self.id_col].apply(lambda x: x not in intersection)]
-        
-        return remainder
-    
-    def filter(self, indices, subset_key: Optional[str]="all"):
-        out = type(self)(samples_df = self.samples_df.iloc[indices,:],
-                         config = deepcopy(self.config))
-        out.config.update(subset_key=subset_key,
-                          num_samples=len(out))
-        return out
-    
-    def get_unsupervised(self):
-        return UnsupervisedDatasetWrapper(self)
-
-    
-    
-class UnsupervisedDatasetWrapper(torchdata.datasets.Files):#torchvision.datasets.ImageFolder):
-    
-    def __init__(self, dataset):
-        super().__init__(files=dataset.files)
-        self.dataset = dataset
-#         super().__init__(samples_df=dataset.samples_df,
-#                            path_schema=dataset.path_schema)
-        
-        
-        
-    def __getitem__(self, index):
-        return self.dataset[index][0]
-    
-    def __len__(self):
-        return len(self.dataset)
-    
-    def __repr__(self):
-        out = "<UnsupervisedDatasetWrapper>\n"
-        out += self.dataset.__repr__()
-        return out
-    
-#     def parse_sample(self, index: int):
-#         path = self.files[index]
-    
-    
-    
-    
-    
-class ImageFileDataset(CustomDataset):
-    
-    @classmethod
-    def from_config(cls, config: DatasetConfig, subset_keys: List[str]=None) -> "CustomDataset":
-        files = config.locate_files()
-        if isinstance(subset_keys, list):
-            files = {k: files[k] for k in subset_keys}
-        if len(files.keys())==1: 
-            files = files[subset_keys[0]]
-        new = cls(files=files,
-                  path_schema=config.path_schema)
-        new.config = config
-        return new
-    
-    def parse_sample(self, index: int):
-        path = self.files[index]
-        family, genus, species, collection, catalog_number = self.path_schema.parse(path)
-
-        return SampleSchema(path=path,
-                             family=family,
-                             genus=genus,
-                             species=species,
-                             collection=collection,
-                             catalog_number=catalog_number)
-    
-
-
-
-class CSVDataset(CustomDataset):
-    
-    @classmethod
-    def from_config(cls,
-                    config: DatasetConfig, 
-                    subset_keys: List[str]=None,
-                    eager_encode_targets: bool=False) -> Union[Dict[str, "CSVDataset"], "CSVDataset"]:
-        
-        files_df = config.locate_files()
-        if subset_keys is None:
-            subset_keys = ['all']
-        if isinstance(subset_keys, list) and isinstance(files_df, dict):
-            files_df = {k: files_df[k] for k in subset_keys}
-            new = {k: cls(samples_df=files_df[k],  \
-                          eager_encode_targets=eager_encode_targets) for k in subset_keys}
-            for k in subset_keys:
-                new[k].config = deepcopy(config)
-                new[k].config.subset_key = k
-
-        if len(subset_keys)==1:
-            if isinstance(files_df, dict):
-                files_df = files_df[subset_keys[0]]
-            new = cls(samples_df=files_df, 
-                      eager_encode_targets=eager_encode_targets)
-            new.config = config
-            new.config.subset_key = subset_keys[0]
-        return new
-    
-    def setup(self,
-              samples_df: pd.DataFrame=None,
-              label_encoder: LabelEncoder=None,
-              fit_targets: bool=True):
-        
-        if samples_df is not None:
-            self.samples_df = samples_df.convert_dtypes()
-        self.files = self.samples_df[self.x_col].apply(lambda x: Path(x)).tolist()
-        super().setup(samples_df=self.samples_df,
-                      label_encoder=label_encoder,
-                      fit_targets=fit_targets)
-#         self.samples = [self.parse_sample(idx) for idx in range((len(self)))]
-#         self.targets = [sample[1] for sample in self.samples]       
-#         self.samples_df = pd.DataFrame(self.samples).convert_dtypes()
-        
-#         self.label_encoder = label_encoder or LabelEncoder()
-#         if fit_targets:
-#             self.label_encoder.fit(self.targets)
-        
-#         if self.eager_encode_targets:
-#             self.targets = self.label_encoder.encode(self.targets).tolist()
-
-    
-    def parse_sample(self, index: int):
-        
-        row = self.samples_df.iloc[index,:].tolist()
-        path, family, genus, species, collection, catalog_number = row
-        return SampleSchema(path=path,
-                             family=family,
-                             genus=genus,
-                             species=species,
-                             collection=collection,
-                             catalog_number=catalog_number)
-    
-
-
-
-
-
-# class DataSplitter:
-
-#     @classmethod
-#     def create_trainvaltest_splits(cls,
-#                                    data: torchdata.Dataset,
-#                                    val_split: float=0.2,
-#                                    test_split: Optional[Union[str, float]]=None, #0.3,
-#                                    shuffle: bool=True,
-#                                    seed: int=3654,
-#                                    stratify: bool=True,
-#                                    plot_distributions: bool=False) -> Tuple["FossilDataset"]:
-        
-#         if (test_split == "test") or (test_split is None):
-#             train_split = 1 - val_split
-#             if hasattr(data, f"test_dataset"):
-#                 data = getattr(data, f"train_dataset")            
-#         elif isinstance(test_split, float):
-#             train_split = 1 - (test_split + val_split)
-#         else:
-#             raise ValueError(f"Invalid split arguments: val_train_split={val_train_split}, test_split={test_split}")
-
-
-#         splits=(train_split, val_split, test_split)
-#         splits = list(filter(lambda x: isinstance(x, float), splits))
-#         y = data.targets
-
-#         if len(splits)==2:
-#             data_splits = trainval_split(x=None,
-#                                          y=y,
-#                                          val_train_split=splits[-1],
-#                                          random_state=seed,
-#                                          stratify=stratify)
-
-#         else:
-#             data_splits = trainvaltest_split(x=None,
-#                                              y=y,
-#                                              splits=splits,
-#                                              random_state=seed,
-#                                              stratify=stratify)
-
-#         dataset_splits={}
-#         for split, (split_idx, split_y) in data_splits.items():
-#             print(split, len(split_idx))
-#             dataset_splits[split] = data.filter(indices=split_idx, subset_key=split)
-        
-        
-#         label_encoder = LabelEncoder()
-#         label_encoder.fit(dataset_splits["train"].targets)
-        
-#         for d in [*list(dataset_splits.values()), data]:
-#             d.label_encoder = label_encoder
-#         return dataset_splits
 
 
 
@@ -1014,6 +417,13 @@ def make_extant_w_pnas(args):
 
     
     
+    
+    
+    
+    
+    
+    
+    
 CSV_CATALOG_DIR_V0_3 = "/media/data_cifs/projects/prj_fossils/users/jacob/experiments/July2021-Nov2021/csv_datasets/leavesdb-v0_3"    
 CSV_CATALOG_DIR_V1_0 = "/media/data_cifs/projects/prj_fossils/users/jacob/experiments/July2021-Nov2021/csv_datasets/leavesdb-v1_0"
 EXPERIMENTAL_DATASETS_DIR = "/media/data_cifs/projects/prj_fossils/users/jacob/experiments/July2021-Nov2021/csv_datasets/experimental_datasets"
@@ -1067,6 +477,11 @@ if __name__ == "__main__":
     
     
     
+#######################################################
+#######################################################
+#######################################################
+#######################################################
+    
     
     
     
@@ -1098,27 +513,567 @@ if __name__ == "__main__":
     
     
     
+
+
+
+#######################################################
+#######################################################
+#######################################################
+#######################################################
+    
+
+# totensor: Callable = torchvision.transforms.ToTensor()
+# def toPIL(img: torch.Tensor, mode="RGB") -> Callable:
+#     return torchvision.transforms.ToPILImage(mode)(img)
+
+# class Extract(ExtractBase):
+    
+    
+#     @classmethod
+#     def export_dataset_state(cls,
+#                              output_dir: Union[str, Path],
+#                              df: pd.DataFrame=None,
+#                              config: DictConfig=None,
+#                              encoder: LabelEncoder=None,
+#                              dataset_name: Optional[str]="dataset"
+#                              ) -> None:
+        
+#         paths = {ftype: str(output_dir / str(dataset_name + ext)) for ftype, ext in cls.data_file_ext_maps.items()}
+        
+#         output_dir = Path(output_dir)
+#         if isinstance(df, pd.DataFrame):
+#             cls.df2csv(df = df,
+#                        path = paths["df"])
+#             if config:
+#                 config.data_path = paths["df"]
+#         if isinstance(encoder, LabelEncoder):
+#             cls.labels2json(encoder=encoder,
+#                             path = paths["encoder"])
+#             if config:
+#                 config.label_encoder_path = paths["encoder"]
+#         if isinstance(config, CSVDatasetConfig):
+#             config.save(path = paths["config"])
+# #             cls.config2yaml(config=config,
+# #                             path = paths["config"])
+            
+            
+#     @classmethod
+#     def import_dataset_state(cls,
+#                              data_dir: Optional[Union[str, Path]]=None,
+#                              config_path: Optional[Union[Path, str]]=None,
+#                             ) -> Tuple["CSVDataset", "CSVDatasetConfig"]:
+#         if (not os.path.exists(str(data_dir))) and (not os.path.exists(config_path)):
+#             raise ValueError("Either data_dir or config_path must be existing paths")
+        
+#         if os.path.isdir(str(data_dir)):
+#             data_dir = Path(data_dir)
+#         paths = {}
+        
+#         # import config yaml file
+#         if os.path.isfile(str(config_path)):
+#             paths['config'] = config_path
+# #             config = cls.config_from_yaml(path = paths["config"])
+#             config = CSVDatasetConfig.load(path = paths["config"])
+#             if hasattr(config, "data_path"):
+#                 paths["df"] = str(config.data_path)
+#             if hasattr(config, "label_encoder_path"):
+#                 paths["encoder"] = str(config.label_encoder_path)
+#             data_dir = Path(os.path.dirname(config_path))
+            
+#         for ftype, ext in cls.data_file_ext_maps.items():
+#             if ftype not in paths:
+#                 paths[ftype] = str(list(data_dir.glob("*" + ext))[0])
+                
+                
+#         config.data_path = str(paths["df"])
+#         config.label_encoder_path = str(paths["encoder"])
+#         if os.path.isfile(paths["encoder"]):
+#             # import label encodings json file if it exists
+#             label_encoder = cls.labels_from_json(path = paths["encoder"])
+            
+#         # import dataset samples from a csv file as a CustomDataset/CSVDataset object
+#         dataset = CSVDataset.from_config(config,
+#                                          eager_encode_targets=True)
+#         dataset.setup(samples_df=dataset.samples_df,
+#                       label_encoder=label_encoder,
+#                       fit_targets=True)
+        
+#         return dataset, config
+
+
+# @dataclass
+# class BaseDatasetConfig:
+
+#     def save(self,
+#              path: Union[str, Path]) -> None:
+        
+#         cfg = asdict(self)
+# #         cfg = DictConfig({k: getattr(self,k) for k in self.keys()})
+#         Extract.config2yaml(cfg, path)
+    
+#     @classmethod
+#     def load(cls,
+#              path: Union[str, Path]) -> "DatasetConfig":
+
+#         cfg = Extract.config_from_yaml(path)
+
+# #         keys = cls.__dataclass_fields__.keys()
+#         cfg = cls(**{k: cfg[k] for k in cls.keys()})
+#         return cfg
+    
+#     @classmethod
+#     def keys(cls):
+#         return cls.__dataclass_fields__.keys()
+    
+#     def __repr__(self):
+#         out = f"{type(self)}" + "\n"
+#         out += "\n".join([f"{k}: {getattr(self, k)}" for k in self.keys()])
+# #         out += f"\nroot_dir: {self.root_dir}"
+# #         out += "\nsubset_dirs: \n\t" + '\n\t'.join(self.subset_dirs)
+#         return out
+
+    
+# @dataclass
+# class DatasetConfig(BaseDatasetConfig):
+#     base_dataset_name: str = "Extant_Leaves"
+#     class_type: str = "family"
+#     threshold: Optional[int] = 10
+#     resolution: int = 512
+#     version: str = "v1_0"
+#     path_schema: str = "{family}_{genus}_{species}_{collection}_{catalog_number}"
+    
+#     @property
+#     def available_versions(self) -> List[str]:
+#         return list(catalog_registry.available_datasets().versions.keys())
+
+#     @property
+#     def full_name(self) -> str:
+#         name  = self.base_dataset_name
+#         if self.threshold:
+#             name += f"_{self.class_type}_{self.threshold}"
+#         name += f"_{self.resolution}"
+#         return name
+
+    
+# class ImageFileDatasetConfig(DatasetConfig):
+    
+#     @property
+#     def root_dir(self):
+#         return catalog_registry.available_datasets.get(self.full_name, version=self.version)
+    
+#     def is_valid_subset(self, subset: str):
+#         for s in ("train", "val", "test"):
+#             if s in subset:
+#                 return True
+#         return False
+    
+#     @property
+#     def subsets(self):
+#         if isinstance(self.root_dir, list):
+#             return []
+#         return [s for s in os.listdir(self.root_dir) if self.is_valid_subset(s)]
+    
+#     @property
+#     def subset_dirs(self):
+#         return [os.path.join(self.root_dir, subset) for subset in self.subsets]
+# #         subsets = self.subsets
+# #         return [os.path.join(self.root_dir, subset) for subset in subsets if self.is_valid_subset(subset)]
+
+#     def locate_files(self) -> Dict[str, List[Path]]:
+#         return Extract.locate_files(self.root_dir)
+
+
+#     @cached_property
+#     def num_samples(self):
+# #         subset_dirs = {Path(subset_dir).stem: Path(subset_dir) for subset_dir in self.subset_dirs}
+#         files = {subset: f for subset, f in self.locate_files().items() if self.is_valid_subset(subset)}
+#         return {subset: len(list(f)) for subset, f in files.items()}
+# #         return {subset: len(list(subset_dirs[subset].rglob("*/*.jpg"))) for subset in subset_dirs.keys()}
+    
+    
+#     def __repr__(self):
+#         out = super().__repr__()
+#         out += f"\nroot_dir: {self.root_dir}"
+#         out += "\nsubsets: "
+#         for i, subset in enumerate(self.subsets):
+#             out += '\n\t' + f"{subset}:"
+#             out += '\n\t\t' + f"subdir: {self.subset_dirs[i]}"
+#             out += '\n\t\t' + f"subset_num_samples: {self.num_samples[subset]}"
+#         return out
+
+
+# @dataclass
+# class CSVDatasetConfig(BaseDatasetConfig):
+    
+#     full_name: str = None
+#     data_path: str = None
+#     label_encoder_path: Optional[str] = None
+#     subset_key: str = "all"
+    
+#     def update(self, **kwargs):
+#         if "subset_key" in kwargs:
+#             self.subset_key = kwargs["subset_key"]
+#         if "num_samples" in kwargs:
+#             self.num_samples = {self.subset_key: kwargs["num_samples"]}
+    
+#     @cached_property
+#     def num_samples(self):
+#         return {self.subset_key: len(self.locate_files())}
+
+#     def __repr__(self):
+#         out = super().__repr__()
+#         out += '\n' + f"num_samples: {self.num_samples[self.subset_key]}"
+#         return out
+
+#     def locate_files(self) -> pd.DataFrame: #Dict[str, List[Path]]:
+#         return Extract.df_from_csv(self.data_path)
+    
+#     def load_label_encoder(self) -> Union[None, LabelEncoder]:
+#         if os.path.exists(str(self.label_encoder_path)):
+#             return Extract.labels_from_json(str(self.label_encoder_path))
+#         return
+
+#     @classmethod
+#     def export_dataset_state(cls,
+#                              output_dir: Union[str, Path],
+#                              df: pd.DataFrame=None,
+#                              config: DictConfig=None,
+#                              encoder: LabelEncoder=None,
+#                              dataset_name: Optional[str]="dataset"
+#                              ) -> None:
+#         Extract.export_dataset_state(output_dir=output_dir,
+#                                      df=df,
+#                                      config=config,
+#                                      encoder=encoder,
+#                                      dataset_name=dataset_name)
+
+            
+#     @classmethod
+#     def import_dataset_state(cls,
+#                              data_dir: Optional[Union[str, Path]]=None,
+#                              config_path: Optional[Union[Path, str]]=None,
+#                             ) -> Tuple["CSVDataset", "CSVDatasetConfig"]:
+
+#         return Extract.import_dataset_state(data_dir=data_dir,
+#                                             config_path=config_path)
+
+
+
+
+
+# ####################################
+# ####################################
+
+
+
+# @dataclass
+# class SampleSchema:
+#     path : Union[str, Path] = None
+#     family : str = None
+#     genus : str = None
+#     species : str = None
+#     collection : str = None
+#     catalog_number : str = None
+
+#     @classmethod
+#     def keys(cls):
+#         return list(cls.__dataclass_fields__.keys())
+        
+#     def __getitem__(self, index: int):
+#         return getattr(self, self.keys()[index])
+                
+        
+# class CustomDataset(torchdata.datasets.Files): # (CommonDataset):
+
+#     def __init__(self,
+#                  files: List[Path]=None,
+#                  samples_df: pd.DataFrame=None,
+#                  path_schema: Path = "{family}_{genus}_{species}_{collection}_{catalog_number}",
+#                  return_signature: List[str] = ["image","target"], #,"path"],
+#                  eager_encode_targets: bool = False,
+#                  config: Optional[BaseDatasetConfig]=None,
+#                  transform=None):
+#         files = files or []
+#         super().__init__(files=files)
+# #         self.samples_df = samples_df
+#         self.path_schema = PathSchema(path_schema)
+#         self._return_signature = collections.namedtuple("return_signature", return_signature)
+        
+#         self.x_col = "path"
+#         self.y_col = "family"
+#         self.id_col = "catalog_number"
+#         self.config = config or {}
+#         self.transform = transform
+#         self.eager_encode_targets = eager_encode_targets
+#         self.setup(samples_df=samples_df)
+        
+        
+#     def fetch_item(self, index: int) -> Tuple[str]:
+#         sample = self.parse_sample(index)
+#         image = Image.open(sample.path)
+#         return self.return_signature(image=image,
+#                                      target=getattr(sample, self.y_col),
+#                                      path=getattr(sample, self.x_col))
+
+#     def return_signature(self, **kwargs):
+#         return self._return_signature(**{key: kwargs[key] for key in self._return_signature._fields if key in kwargs})    
+    
+#     def __getitem__(self, index: int):
+        
+#         item = self.fetch_item(index)
+#         image, target, path = item.image, item.target, str(getattr(item, "path", None))
+        
+#         target = self.label_encoder.class2idx[target]
+        
+#         if self.transform is not None:
+# #             image = totensor(image)
+#             image = self.transform(image)
+# #         if self.target_transform is not None:
+# #             target = self.target_transform(target)
+
+#         if path:
+#             return tuple(self.return_signature(image=image, target=target, path=path))
+#         return tuple(self.return_signature(image=image, target=target))
+    
+        
+#     def setup(self,
+#               samples_df: pd.DataFrame=None,
+#               label_encoder: LabelEncoder=None,
+#               fit_targets: bool=True):
+#         """
+#         Running setup() should result in the Dataset having assigned values for:
+#             self.samples
+#             self.targets
+#             self.samples_df
+#             self.label_encoder
+        
+#         """
+#         if samples_df is not None:
+#             self.samples_df = samples_df.convert_dtypes()
+#         self.samples = [self.parse_sample(idx) for idx in range((len(self)))]
+#         self.targets = [sample[1] for sample in self.samples]
+#         self.samples_df = pd.DataFrame(self.samples).convert_dtypes()
+        
+#         self.label_encoder = label_encoder or LabelEncoder()
+#         if fit_targets:
+#             self.label_encoder.fit(self.targets)
+            
+#         if self.eager_encode_targets:
+#             self.targets = self.label_encoder.encode(self.targets).tolist()
+        
+#     @classmethod
+#     def from_config(cls, config: DatasetConfig, subset_keys: List[str]=None) -> "CustomDataset":
+#         pass
+        
+#     def parse_sample(self, index: int):
+#         pass
+    
+#     @property
+#     def classes(self):
+#         return self.label_encoder.classes
+    
+#     def __repr__(self):
+#         disp = f"""<{str(type(self)).strip("'>").split('.')[1]}>:"""
+#         disp += '\n\t' + self.config.__repr__().replace('\n','\n\t')
+# #         if len(self):
+# #             disp += "\n\t" + f"num_samples: {len(self)}"
+#         return disp
+
+    
+#     @classmethod
+#     def get_files_from_samples(cls,
+#                                samples: Union[pd.DataFrame, List],
+#                                x_col: Optional[str]="path"):
+#         if isinstance(samples, pd.DataFrame):
+#             if x_col in samples.columns:
+#                 files = list(samples[x_col].values)
+#             else:
+#                 files = list(samples.iloc[:,0].values)
+#         elif isinstance(samples, list):
+#             files = [s[0] for s in self.samples]
+            
+#         return files
+    
+#     def intersection(self, other, suffixes=("_x","_y")):
+#         samples_df = self.samples_df
+#         other_df = other.samples_df
+        
+#         intersection = samples_df.merge(other_df, how='inner', on=self.id_col, suffixes=suffixes)
+#         return intersection
+    
+#     def __add__(self, other):
+    
+#         intersection = self.intersection(other)[self.id_col].tolist()
+#         samples_df = self.samples_df
+        
+#         left_union = samples_df[samples_df[self.id_col].apply(lambda x: x in intersection)]
+        
+#         return left_union
+    
+#     def __sub__(self, other):
+    
+#         intersection = self.intersection(other)[self.id_col].tolist()
+#         samples_df = self.samples_df
+        
+#         remainder = samples_df[samples_df[self.id_col].apply(lambda x: x not in intersection)]
+        
+#         return remainder
+    
+#     def filter(self, indices, subset_key: Optional[str]="all"):
+#         out = type(self)(samples_df = self.samples_df.iloc[indices,:],
+#                          config = deepcopy(self.config))
+#         out.config.update(subset_key=subset_key,
+#                           num_samples=len(out))
+#         return out
+    
+#     def get_unsupervised(self):
+#         return UnsupervisedDatasetWrapper(self)
+
+    
+    
+# class UnsupervisedDatasetWrapper(torchdata.datasets.Files):#torchvision.datasets.ImageFolder):
+    
+#     def __init__(self, dataset):
+#         super().__init__(files=dataset.files)
+#         self.dataset = dataset
+# #         super().__init__(samples_df=dataset.samples_df,
+# #                            path_schema=dataset.path_schema)
+        
+        
+        
+#     def __getitem__(self, index):
+#         return self.dataset[index][0]
+    
+#     def __len__(self):
+#         return len(self.dataset)
+    
+#     def __repr__(self):
+#         out = "<UnsupervisedDatasetWrapper>\n"
+#         out += self.dataset.__repr__()
+#         return out
+    
+# #     def parse_sample(self, index: int):
+# #         path = self.files[index]
     
     
     
     
     
+# class ImageFileDataset(CustomDataset):
     
+#     @classmethod
+#     def from_config(cls, config: DatasetConfig, subset_keys: List[str]=None) -> "CustomDataset":
+#         files = config.locate_files()
+#         if isinstance(subset_keys, list):
+#             files = {k: files[k] for k in subset_keys}
+#         if len(files.keys())==1: 
+#             files = files[subset_keys[0]]
+#         new = cls(files=files,
+#                   path_schema=config.path_schema)
+#         new.config = config
+#         return new
     
+#     def parse_sample(self, index: int):
+#         path = self.files[index]
+#         family, genus, species, collection, catalog_number = self.path_schema.parse(path)
+
+#         return SampleSchema(path=path,
+#                              family=family,
+#                              genus=genus,
+#                              species=species,
+#                              collection=collection,
+#                              catalog_number=catalog_number)
     
+
+
+
+# class CSVDataset(CustomDataset):
     
+#     @classmethod
+#     def from_config(cls,
+#                     config: DatasetConfig, 
+#                     subset_keys: List[str]=None,
+#                     eager_encode_targets: bool=False) -> Union[Dict[str, "CSVDataset"], "CSVDataset"]:
+        
+#         files_df = config.locate_files()
+#         if subset_keys is None:
+#             subset_keys = ['all']
+#         if isinstance(subset_keys, list) and isinstance(files_df, dict):
+#             files_df = {k: files_df[k] for k in subset_keys}
+#             new = {k: cls(samples_df=files_df[k],  \
+#                           eager_encode_targets=eager_encode_targets) for k in subset_keys}
+#             for k in subset_keys:
+#                 new[k].config = deepcopy(config)
+#                 new[k].config.subset_key = k
+
+#         if len(subset_keys)==1:
+#             if isinstance(files_df, dict):
+#                 files_df = files_df[subset_keys[0]]
+#             new = cls(samples_df=files_df, 
+#                       eager_encode_targets=eager_encode_targets)
+#             new.config = config
+#             new.config.subset_key = subset_keys[0]
+#         return new
     
+#     def setup(self,
+#               samples_df: pd.DataFrame=None,
+#               label_encoder: LabelEncoder=None,
+#               fit_targets: bool=True):
+        
+#         if samples_df is not None:
+#             self.samples_df = samples_df.convert_dtypes()
+#         self.files = self.samples_df[self.x_col].apply(lambda x: Path(x)).tolist()
+#         super().setup(samples_df=self.samples_df,
+#                       label_encoder=label_encoder,
+#                       fit_targets=fit_targets)
+# #         self.samples = [self.parse_sample(idx) for idx in range((len(self)))]
+# #         self.targets = [sample[1] for sample in self.samples]       
+# #         self.samples_df = pd.DataFrame(self.samples).convert_dtypes()
+        
+# #         self.label_encoder = label_encoder or LabelEncoder()
+# #         if fit_targets:
+# #             self.label_encoder.fit(self.targets)
+        
+# #         if self.eager_encode_targets:
+# #             self.targets = self.label_encoder.encode(self.targets).tolist()
+
     
+#     def parse_sample(self, index: int):
+        
+#         row = self.samples_df.iloc[index,:].tolist()
+#         path, family, genus, species, collection, catalog_number = row
+#         return SampleSchema(path=path,
+#                              family=family,
+#                              genus=genus,
+#                              species=species,
+#                              collection=collection,
+#                              catalog_number=catalog_number)
     
-    
-    
-    
-    
-    
-    
-    
-    
-    
+
+
+
+
+
+
+
+
+
+
+
+
+#######################################################
+#######################################################
+#######################################################
+#######################################################
+
+
+
+
+
+
+
+
+
 #         #########################################    
     
 #         A_in_B = create_dataset_A_in_B(dataset_A,
