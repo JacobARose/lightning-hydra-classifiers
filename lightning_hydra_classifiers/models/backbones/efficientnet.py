@@ -25,7 +25,8 @@ class CustomEfficientNet(BaseModule):#, timm.models.efficientnet.EfficientNet):
         super().__init__()
         self.model = timm.create_model(model_name, pretrained=pretrained)
         in_features = self.model.get_classifier().in_features
-        self.model.fc = nn.Linear(in_features, num_classes)
+        self.model.classifier = nn.Linear(in_features, num_classes)
+#         self.model.fc = nn.Linear(in_features, num_classes)
 
     def forward(self, x):
         x = self.model(x)

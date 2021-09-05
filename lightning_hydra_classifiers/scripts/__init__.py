@@ -7,3 +7,6 @@ from . import (train,
 			   finetune,
 			   train_multi_gpu,
 			   train_BYOL)
+
+from . import multitask
+from .multitask import train as train_multitask

@@ -14,9 +14,13 @@ import argparse
 from munch import Munch
 import os
 from pathlib import Path
+from typing import Tuple, Dict
+
+from lightning_hydra_classifiers.data.utils.make_catalogs import CSV_CATALOG_DIR_V1_0, EXPERIMENTAL_DATASETS_DIR
+from lightning_hydra_classifiers.data.datasets.common import CSVDatasetConfig, CSVDataset, DataSplitter
 
 
-from lightning_hydra_classifiers.data.utils.make_catalogs import CSV_CATALOG_DIR_V1_0, EXPERIMENTAL_DATASETS_DIR, CSVDatasetConfig, CSVDataset, DataSplitter
+__all__ = ["TransferExperiment"]
 
 
 class TransferExperiment:
@@ -126,8 +130,6 @@ class TransferExperiment:
     def export_experiment_spec(self, output_root_dir=None):
         
         replace_class_indices = {"Nothofagaceae":"Fagaceae"}
-#         root_dir = output_root_dir or self.experiment_root_dir
-#         experiment_dir = Path(root_dir) / self.experiment_name
         experiment_root_dir = output_root_dir or self.experiment_root_dir
         experiment_dir = Path(experiment_root_dir, self.experiment_name)
         os.makedirs(experiment_dir, exist_ok=True)
@@ -136,19 +138,14 @@ class TransferExperiment:
         
         task_0 = self.setup_task_0()
         task_1 = self.setup_task_1()
-        
-#         import pdb;pdb.set_trace()
 
-#         print(f"__init__: {task_0['train'].label_encoder}")
         task_0_label_encoder = task_0['train'].label_encoder
         task_0_label_encoder.__init__(replacements = replace_class_indices)
 
-#         print(f"Fitting: len(task_0['test'].targets)={len(task_0['test'].targets)}")
         task_0_label_encoder.fit(task_0['test'].targets)
-        print(len(task_0_label_encoder.classes))
-#         print(f"Fitting: len(task_0['train'].targets)={len(task_0['train'].targets)}")
+#         print(len(task_0_label_encoder.classes))
         task_0_label_encoder.fit(task_0['train'].targets)
-        print(len(task_0_label_encoder.classes))
+#         print(len(task_0_label_encoder.classes))
 
         task_0['val'].label_encoder = task_0_label_encoder
         task_0['test'].label_encoder = task_0_label_encoder
@@ -191,7 +188,7 @@ class TransferExperiment:
                                train_transform=None,
                                train_target_transform=None,
                                val_transform=None,
-                               val_target_transform=None):
+                               val_target_transform=None) -> Tuple[Dict[str,CSVDataset]]:
 
         experiment_dir = Path(self.experiment_dir)
         task_0_dir = experiment_dir / "task_0"
@@ -209,7 +206,6 @@ class TransferExperiment:
             task_0["train"].target_transform = train_target_transform
             task_1["train"].target_transform = train_target_transform
 
-            
         for subset in ["val","test"]:
             if train_transform:
                 task_0[subset].transform = val_transform
@@ -239,7 +235,5 @@ def cmdline_args():
 if __name__ == "__main__":
     
     args = cmdline_args()
-    
     experiment = TransferExperiment()
-    
     experiment.export_experiment_spec(output_root_dir=args.output_dir)

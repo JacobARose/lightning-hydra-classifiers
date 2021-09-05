@@ -268,7 +268,7 @@ class CustomResNet(BaseModule):
         return x
     
     def unfreeze_at(self, layer: str):
-        assert layer in efficientnet_layers
+        assert layer in ResNet.layers
         self.model.requires_grad = True        
         for name, param in model.named_parameters():
             if layer in name:
