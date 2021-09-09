@@ -29,7 +29,11 @@ log = template_utils.get_logger(__name__)
 
 __all__ = ["LabelEncoder", "trainval_split", "trainvaltest_split", "DataSplitter",
            "plot_split_distributions", "plot_class_distributions", "filter_df_by_threshold",
-           "compute_class_counts"]
+           "compute_class_counts", "Batch"]
+
+from collections import namedtuple
+# Batch = namedtuple("Batch", ("image", "target", "path", "catalog_number"))
+Batch = namedtuple("Batch", ("image", "target", "metadata"))
 
 
 class LabelEncoder(object):

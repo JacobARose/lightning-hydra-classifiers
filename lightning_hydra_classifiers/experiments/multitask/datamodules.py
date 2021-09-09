@@ -16,6 +16,10 @@ from torchvision import transforms
 import torch
 
 from lightning_hydra_classifiers.experiments.transfer_experiment import TransferExperiment
+from lightning_hydra_classifiers.utils.template_utils import get_logger
+############################################
+logger = get_logger(name=__name__)
+
 
 __all__ = ["MultiTaskDataModule"]
 
@@ -39,7 +43,6 @@ class MultiTaskDataModule(pl.LightningDataModule):
         
         
         self.experiment = TransferExperiment()
-        self.set_task(task_id)        
         
         self.image_size = image_size
         self.image_buffer_size = image_buffer_size
@@ -49,6 +52,8 @@ class MultiTaskDataModule(pl.LightningDataModule):
         self.__init_transforms()
         self.tasks = self.experiment.get_multitask_datasets(train_transform=self.train_transform,
                                                             val_transform=self.val_transform)
+        self.task_tag = None
+        self.set_task(task_id)
 
     def __init_transforms(self):
         
@@ -74,14 +79,19 @@ class MultiTaskDataModule(pl.LightningDataModule):
     def set_task(self, task_id: int):
         assert task_id in self.experiment.valid_tasks
         self.task_id = task_id
+        logger.info(f"set_task(task_id={self.task_id})")
+#         self.setup()
         
-
     @property
     def current_task(self):
         return self.tasks[self.task_id]
 
-    def setup(self, stage=None):
+    def setup(self, stage=None, task_id: int=None):
+#         super().setup(stage)
+        if isinstance(task_id , int):
+            self.set_task(task_id=task_id)
         task = self.current_task
+#         logger.info(f"Task_{self.task_id}: datamodule.setup(stage={stage})")
         # Assign train/val datasets for use in dataloaders
         if stage == 'fit' or stage is None:
             self.train_dataset = task['train']
@@ -90,10 +100,18 @@ class MultiTaskDataModule(pl.LightningDataModule):
             self.classes = self.train_dataset.classes
             self.num_classes = len(self.train_dataset.label_encoder)
             self.label_encoder = self.train_dataset.label_encoder
-            
-        elif stage == 'test':
+            if hasattr(self.train_dataset.config, "task_tag"):
+                self.task_tag = self.train_dataset.config.task_tag
+            logger.info(f"Task_{self.task_id} ({self.task_tag}): datamodule.setup(stage=fit)")
+        
+        if stage == 'test' or stage is None:
             self.test_dataset = task['test']
-                        
+            logger.info(f"Task_{self.task_id}: datamodule.setup(stage=test)")
+            
+        self._has_setup_fit = False
+        self._has_setup_test = False
+#         else:
+#             logger.warning(f"[No-Op] Task_{self.task_id}: datamodule.setup(stage={stage})")
     def train_dataloader(self):
         return torch.utils.data.DataLoader(self.train_dataset,
                           batch_size=self.batch_size,

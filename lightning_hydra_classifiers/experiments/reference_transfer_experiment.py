@@ -129,7 +129,7 @@ class CIFAR10DataModule(pl.LightningDataModule):
         self.mean = [0.485, 0.456, 0.406]
         self.std = [0.229, 0.224, 0.225]
         # Train augmentation policy
-        
+        self.set_task(task_id=task_id)
         self.__init_transforms()
 
         
@@ -138,10 +138,14 @@ class CIFAR10DataModule(pl.LightningDataModule):
         self.task_id = task_id
         
     @property
-    def current_task(self):
-        return {"train":self.train_dataset,
+    def tasks(self) -> List[Dict[str,"Dataset"]]:
+        return [{"train":self.train_dataset,
                 "val":self.val_dataset,
-                "test":self.test_dataset}
+                "test":self.test_dataset}]
+        
+    @property
+    def current_task(self):
+        return self.tasks[self.task_id]
 
 
     def prepare_data(self):

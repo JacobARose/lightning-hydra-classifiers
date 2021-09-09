@@ -14,8 +14,16 @@
 
 """
 
+Run default experiment:
 
-python "/media/data/jacob/GitHub/lightning-hydra-classifiers/lightning_hydra_classifiers/scripts/train_multitask.py"
+>> python "/media/data/jacob/GitHub/lightning-hydra-classifiers/lightning_hydra_classifiers/scripts/train_multitask.py"
+
+
+>> python "/media/data/jacob/GitHub/lightning-hydra-classifiers/lightning_hydra_classifiers/scripts/multitask/train.py" --list_available_backbones
+
+
+>> python "/media/data/jacob/GitHub/lightning-hydra-classifiers/lightning_hydra_classifiers/scripts/multitask/train.py" --gpus "7" -e 120 -res 512 -buffer 32 -nproc 4 -model efficientnet_b3 -bsz 64 -init_freeze "layer4" -pre "imagenet"
+
 """
 
 
@@ -23,11 +31,13 @@ python "/media/data/jacob/GitHub/lightning-hydra-classifiers/lightning_hydra_cla
 import numpy as np
 import collections
 import os
-if 'TOY_DATA_DIR' not in os.environ: 
+import sys
+if 'TOY_DATA_DIR' not in os.environ:
     os.environ['TOY_DATA_DIR'] = "/media/data_cifs/projects/prj_fossils/data/toy_data"
 default_root_dir = os.environ['TOY_DATA_DIR']
 # os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
+from pathlib import Path
 import pandas as pd
 pd.set_option('display.max_rows', 500)
 pd.set_option('display.max_columns', 500)
@@ -69,7 +79,8 @@ from lightning_hydra_classifiers.utils.template_utils import get_logger
 
 
 from lightning_hydra_classifiers.scripts.pretrain import lr_tuner
-
+# from pl_bolts.callbacks import TrainingDataMonitor
+import pl_bolts
 ############################################
 logger = get_logger(name=__name__)
 ########################################################
@@ -96,7 +107,7 @@ def load_data_and_model(config: argparse.Namespace, task_id: int=0) -> Tuple["Da
                                      image_buffer_size=config.data.image_buffer_size,
                                      num_workers=config.data.num_workers,
                                      pin_memory=config.data.pin_memory)
-    datamodule.setup("fit")
+    datamodule.setup()#"fit")
     config.model.num_classes = datamodule.num_classes
     pp(config)
     
@@ -129,10 +140,14 @@ def train_task(config: argparse.Namespace, task_id: int=0):
     checkpoint_callback = pl.callbacks.ModelCheckpoint(monitor=config.callbacks.monitor.metric,
                                                        save_top_k=1,
                                                        save_last=True,
-                                                       dirpath=str(Path(config.model_ckpt_dir, f"task_{task_id}")),
+                                                       dirpath=str(Path(config.stages[f"task_{task_id}"].model_ckpt_dir, f"task_{task_id}")),
                                                        filename='{epoch:02d}-{val_loss:.4f}-{val_acc:.4f}',
                                                        verbose=True,
                                                        mode=config.callbacks.monitor.mode)
+    
+    lr_monitor_callback = pl.callbacks.LearningRateMonitor(logging_interval="step", log_momentum=True)
+    data_monitor_callback = pl_bolts.callbacks.ModuleDataMonitor(submodules=True)
+    #TrainingDataMonitor(log_every_n_steps=25)
     earlystopping = pl.callbacks.EarlyStopping(monitor=config.callbacks.monitor.metric,
                                                patience=3,
                                                mode=config.callbacks.monitor.mode)
@@ -144,17 +159,18 @@ def train_task(config: argparse.Namespace, task_id: int=0):
                                           reinit=True,
                                           dir=config.experiment_dir)
 
-    trainer = pl.Trainer(
+    trainer = pl.Trainer(**dict(config.trainer),
 #                 limit_train_batches=0.1,
 #                 limit_val_batches=0.1,
-                resume_from_checkpoint=config.trainer.resume_from_checkpoint,
-                max_epochs=config.trainer.num_epochs,
-                gpus=config.trainer.gpus,
-                auto_lr_find=config.stages.lr_tuner,
-                precision=config.trainer.precision,
+#                 resume_from_checkpoint=config.trainer.resume_from_checkpoint,
+#                 max_epochs=config.trainer.num_epochs,
+#                 gpus=config.trainer.gpus,
+#                 auto_lr_find=bool(config.model.lr is not None),
+#                 precision=config.trainer.precision,
                 callbacks=[earlystopping,
                            checkpoint_callback,
-                           img_prediction_callback],
+                           img_prediction_callback,
+                           data_monitor_callback],
 #                 overfit_batches=5,
                 logger=wandb_logger,
 #                 track_grad_norm=2,
@@ -163,22 +179,26 @@ def train_task(config: argparse.Namespace, task_id: int=0):
     if config.debug == True:
         import pdb; pdb.set_trace()
 
-    if config.stages.lr_tuner == True:        
-        with wandb.init(entity = "jrose",
-                        project = "image_classification_train",
-                        job_type = "lr_tune",
-                        config=dict(config),
-                        group=f'{config.model.model_name}_task_{task_id}',
-                        reinit=True,
-                        dir=config.experiment_dir) as run:
+#     if config.model.lr is None:
+#     if True:
+#     if config.stages[f"task_{task_id}"].lr_tuner is not None:
+#     with wandb.init(job_type = "lr_tune",
+#                     config=dict(config),
+#                     group=f'{config.model.model_name}_task_{task_id}',
+#                     reinit=True) as run:
 
-            logger.info(f"[Initiating Stage] lr_tuner")
-            suggestion, lr_tuner_results, config = lr_tuner.run_lr_tuner(trainer=trainer,
-                                                                         model=model,
-                                                                         datamodule=datamodule,
-                                                                         config=config,
-                                                                         results_path=config.stages[f"task_{i}"].lr_tuner_results_path,
-                                                                         run=run)
+        logger.info(f"[Initiating Stage] lr_tuner")
+        suggestion, lr_tuner_results, config = lr_tuner.run_lr_tuner(trainer=trainer,
+                                                                     model=model,
+                                                                     datamodule=datamodule,
+                                                                     config=config,
+                                                                     results_path = config.stages[f"task_{task_id}"].lr_tuner_results_path,
+                                                                     group=f'{config.model.model_name}_task_{task_id}')
+#                                                                      run=run)
+        
+        model.config.lr = suggestion['lr']
+
+        wandb.watch(model, log='all')
 
     try:
         trainer.fit(model, datamodule)
@@ -186,7 +206,8 @@ def train_task(config: argparse.Namespace, task_id: int=0):
         logger.warning("Interruption:", e)
     finally:
         logger.info(f"checkpoint_callback.best_model_path: {checkpoint_callback.best_model_path}")
-        logger.info(f"checkpoint_callback.best_model_score: {checkpoint_callback.best_model_score}")
+        config.stages[f"task_{task_id}"].ckpt_path = checkpoint_callback.best_model_path
+        logger.info(f"checkpoint_callback.best_model_score: {checkpoint_callback.best_model_score:.3f}")
     logger.info(f"[Initiating TESTING on task_{task_id}]")
 
 #     test_results = trainer.test(datamodule=datamodule)
@@ -195,13 +216,13 @@ def train_task(config: argparse.Namespace, task_id: int=0):
                                       model=model,
                                       datamodule=datamodule,
                                       config=config,
-                                      tasks=tasks,
-                                      results_path=results_path)
+                                      tasks="all")#,
+#                                       results_path=results_path)
 
     
     logger.info(f"[FINISHED] TESTING on task_{task_id}")
     logger.info(f"Results: {test_results}")
-    return test_results
+    return test_results, config
 
 
 
@@ -216,12 +237,45 @@ def run_multitask_test(trainer: pl.Trainer,
         tasks = list(range(len(datamodule.tasks)))
     
     test_results = {}
+#     fig, ax = plt.subplots(1,len(tasks))
+#     if not isinstance(ax, list):
+#         ax = [ax]
     for task_id in tasks:
-        datamodule.set_task(task_id)
-        datamodule.setup()
+#         datamodule.set_task(task_id)
+        tag=config.stages[f"task_{task_id}"].name
+#         model.init_metrics(stage='test', tag=tag)
+        trainer.logger = pl.loggers.CSVLogger("logs", name=tag)
+        datamodule.setup(task_id=task_id)
+        logger.info(f"[TESTING] {tag}")
+#         ax[task_id].imshow(datamodule.test_dataset.fetch_item(0)[0])
+#         ax[task_id].set_title(f"{tag}")
         test_results[task_id] = trainer.test(model, datamodule=datamodule)
         
     return test_results
+    
+
+
+# def run_multitask_test(trainer: pl.Trainer,
+#                        model: pl.LightningModule,
+#                        datamodule: pl.LightningDataModule,
+#                        config: argparse.Namespace=None,
+#                        tasks: Union[str, List[int]]="all",
+#                        results_path: str=None,
+#                        run=None):
+#     if tasks == "all":
+#         tasks = list(range(len(datamodule.tasks)))
+    
+#     test_results = {}
+#     for task_id in tasks:
+# #         datamodule.set_task(task_id)
+#         tag=config.stages[f"task_{task_id}"].name
+# #         model.init_metrics(stage='test', tag=tag)
+#         trainer.logger = pl.loggers.CSVLogger("logs", name=tag)
+#         datamodule.setup()
+#         logger.info(f"[TESTING] {tag}")
+#         test_results[task_id] = trainer.test(model, datamodule=datamodule)
+        
+#     return test_results
     
 
 
@@ -232,6 +286,8 @@ def run_multitask_test(trainer: pl.Trainer,
 # output_root_dir = "/media/data_cifs/projects/prj_fossils/users/jacob/experiments/July2021-Nov2021/csv_datasets/experimental_datasets"
 # experiment = TransferExperiment()
 # experiment.export_experiment_spec(output_root_dir=output_root_dir)
+
+
 
 
 def cmdline_args(arg_overrides=None):
@@ -265,20 +321,28 @@ def cmdline_args(arg_overrides=None):
                    help="num_workers per dataloader")
     p.add_argument("-model", "--model_name", dest="model_name", type=str, default="resnet50",
                    help="model backbone architecture")
-    p.add_argument("-init_freeze", "--init_freeze_up_to", dest="init_freeze_up_to", default="layer4",
+    p.add_argument("-l", "--list_available_backbones", dest="list_available_backbones", action="store_true", default=False,
+                   help="List names of available model backbone architectures, then exit.")
+    p.add_argument("-init_freeze", "--init_freeze_up_to", dest="init_freeze_up_to", default=None, #"layer4",
                    help="freeze up to and including layer name or index.")    
-    p.add_argument("-pre", "--pretrained", dest="pretrained", default="imagenet", choices=["imagenet", True, False],
+    p.add_argument("-pre", "--pretrained", dest="pretrained", default="imagenet", choices=["imagenet", "True", "False"],
                    help="Use pretrained imagenet weights or randomly initialize from scratch.")
-    p.add_argument("-lr", "--learning_rate", dest="learning_rate", type=float, default=3e-4,
-                   help="Initial learning rate.")
+    p.add_argument("-lr", "--learning_rate", dest="learning_rate", type=float, default=3e-8,
+                   help="Optional Initial learning rate. Ignored for now, in the future will force skip any lr_tuner stage.")
     p.add_argument("--gpus", dest="gpus", type=int, default=1, nargs="*",
                    help="Specify number of gpus or specific gpu ids.")
     p.add_argument("-d", "--debug", dest="debug", action="store_true", default=False,
                    help="Flag for activating debug-related settings. Currently limited to switching out datamodule to use CIFAR10")
-    args = p.parse_args(arg_overrides)#[""])
+    args = p.parse_args(arg_overrides)
+
+    if args.pretrained == "True":
+        args.pretrained = True
+    elif args.pretrained == "False":
+        args.pretrained = False
+    
     logger.info("Args:")
     pp(args)
-
+    
     config = Munch({
         "seed":42,
 #         "num_epochs": args.num_epochs,
@@ -289,7 +353,7 @@ def cmdline_args(arg_overrides=None):
     })
 
     config.trainer = Munch({"precision": 16,
-                            "num_epochs": args.num_epochs,
+                            "max_epochs": args.num_epochs,
                             "gpus": args.gpus,
                             "resume_from_checkpoint": args.resume_from_checkpoint
                             })
@@ -319,24 +383,38 @@ def cmdline_args(arg_overrides=None):
 #                                      "mode": "min"})
                              })
 
-    config.stages = Munch({"lr_tuner":True,
+    config.stages = Munch({#"lr_tuner":True,
                            "task_0":None,
                            "task_1":None})
     
     
+    if args.list_available_backbones:
+        print(f"--list_available_backbones = True.","\nAvailable Models:")
+        pp(LitMultiTaskModule.available_backbones())
+        sys.exit()
+    
     if config.debug:
-        config.stages.task_0 = Munch({"name":"CIFAR10"})
-    else:
-        config.stages.task_0 = Munch({"name":"Extant-PNAS"})
-        config.stages.task_1 = Munch({"name":"PNAS"})
-
-    if config.stages.task_1 is not None:
-        task_tags = config.stages.task_0.name + "-to-" + config.stages.task_1.name
-#         tasks = {"task_0": config.stages.task_0,
-#                  "task_1": config.stages.task_1}
-    else:
-        task_tags = config.stages.task_0
+        config.stages.task_0 = Munch({"name":"CIFAR10",
+                                      "task_id":0})
+        del config.stages.task_1
+        config.trainer.update(Munch(max_epochs=2,
+                                    limit_train_batches=4,
+                                    limit_val_batches=4,
+                                    limit_test_batches=4,
+                                    auto_lr_find=bool(config.model.lr is not None)))
         
+    else:
+        config.stages.task_0 = Munch({"name":"Extant-PNAS",
+                                      "task_id":0})
+        config.stages.task_1 = Munch({"name":"PNAS",
+                                      "task_id":1})
+
+    if "task_1" in config.stages:
+        task_tags = config.stages.task_0.name + "-to-" + config.stages.task_1.name
+    else:
+        task_tags = config.stages.task_0.name
+        
+    import pdb; pdb.set_trace()
     if config.model.pretrained in ("imagenet", True):
         weights_name = "imagenet_weights"
     else:
@@ -346,6 +424,7 @@ def cmdline_args(arg_overrides=None):
     config.experiment_dir = os.path.join(config.output_dir, config.experiment_name)
     
     for task in config.stages.keys():
+        if config.stages[task] is None: continue
         config.stages[task].model_ckpt_dir = str(Path(config.experiment_dir, task, "checkpoints"))
         config.stages[task].lr_tuner_results_path = str(Path(config.experiment_dir, task, "lr_tuner","hparams.yaml"))
 
@@ -358,20 +437,72 @@ if __name__ == '__main__':
     
     args, config = cmdline_args()
     os.makedirs(config.experiment_dir, exist_ok=True)
-#     os.makedirs(config.output_dir, exist_ok=True)
+
+    os.environ["WANDB_ENTITY"] = "jrose"
+    os.environ["WANDB_PROJECT"] = "image_classification_train"
+    os.environ["WANDB_DIR"] = config.experiment_dir
     
 #     os.environ["CUDA_VISIBLE_DEVICES"] = "0"
     results = {}
     
-    results["task_0"] = train_task(config=config, task_id=0)
+    results["task_0"], config = train_task(config=config, task_id=0)
+    config.model.ckpt_path = config.stages["task_0"].ckpt_path
     
-    torch.save()
-    #TODO Log/Cache experiment artifacts here.    
     
-    results["task_1"] = train_task(config=config, task_id=1)
-    
+    if "task_1" in config.stages:
+        print(f"[Initiating] Transfer to Task_1: {config.stages.task_1.name}")
+        print(f"[Re-loading model from checkpoint path] : {config.model.ckpt_path}")
+        #TODO Log/Cache experiment artifacts here.    
+        results["task_1"], config = train_task(config=config, task_id=1)
+        
+    import json
+    print(f"[SUCCESSFULLY FINISHED TRAIN.PY]")
+    torch.save(results, str(Path(config.experiment_dir, "test_results.pth")))
+    logger.info(json.dumps(results))
+    if os.path.isfile(str(Path(config.experiment_dir, "test_results.pth"))):
+        logger.info(f'Congratulations, your test results are pickled using torch.save to: {str(Path(config.experiment_dir, "test_results.pth"))}')
+    else:
+        logger.warning(f'[Warning] Saving test results to {str(Path(config.experiment_dir, "test_results.pth"))} failed')
 
-    
+
+
+
+
+
+
+
+
+
+
+
+
+
+# class MyLightningCLI(LightningCLI):
+#     def add_arguments_to_parser(self, parser):
+#         parser.add_argument('--tune', action="store_true")
+#         parser.add_argument('--tune_max_lr', type=float, default=1e-2)
+#         parser.add_argument('--tune_save_results', action="store_true")
+        
+#     def before_fit(self):
+#         if self.config["tune"]:
+#             lr_finder  = self.trainer.tuner.lr_find(self.model, max_lr=self.config["tune_max_lr"])  # could add more?
+#             suggested_lr =  lr_finder.suggestion()
+#             print(f"Changing learning rate to {suggested_lr}\n")
+#             self.model.hparams.learning_rate = suggested_lr
+#             if self.config["tune_save_results"]:
+#                 fig = lr_finder.plot(suggest=True)
+#                 logdir = Path(self.trainer.log_dir)
+#                 if not os.path.exists(logdir):
+#                     os.makedirs(logdir)
+#                 fig.savefig( logdir / "lr_results.png")
+
+
+
+
+
+
+
+
 
 
 

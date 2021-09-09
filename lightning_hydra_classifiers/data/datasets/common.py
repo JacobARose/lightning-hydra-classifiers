@@ -49,7 +49,7 @@ from torchvision.transforms import functional as F
 
 from lightning_hydra_classifiers.utils.dataset_management_utils import Extract as ExtractBase
 from lightning_hydra_classifiers.utils import template_utils
-from lightning_hydra_classifiers.utils.common_utils import filter_df_by_threshold
+from lightning_hydra_classifiers.utils.common_utils import filter_df_by_threshold, Batch
 from lightning_hydra_classifiers.utils.dataset_management_utils import (save_config,
                                                                         load_config,
                                                                         LabelEncoder,
@@ -113,8 +113,8 @@ class SampleSchema:
         return getattr(self, self.keys()[index])
 
 
-    
-Batch = namedtuple("Batch", ("image", "target", "path", "catalog_number"))
+
+# Batch = namedtuple("Batch", ("image", "target", "path", "catalog_number"))
 totensor: Callable = torchvision.transforms.ToTensor()
 toPIL: Callable = torchvision.transforms.ToPILImage("RGB")
 
@@ -378,7 +378,7 @@ class CustomDataset(torchdata.datasets.Files): # (CommonDataset):
         files = files or []
         super().__init__(files=files)
         self.path_schema = PathSchema(path_schema)
-        self.Batch = collections.namedtuple("Batch", batch_fields, defaults = (None,)*len(batch_fields))
+#         self.Batch = collections.namedtuple("Batch", batch_fields, defaults = (None,)*len(batch_fields))
         
         self.x_col = "path"
         self.y_col = "family"
@@ -391,18 +391,29 @@ class CustomDataset(torchdata.datasets.Files): # (CommonDataset):
         
         
     def fetch_item(self, index: int) -> Tuple[str]:
+        """
+        Returns identically-structured namedtuple as __getitem__, with the following differences:
+            - PIL Image w/o any transforms vs. torch.Tensor after all transforms
+            - target text label vs, target int label
+            - image path
+            - image catalog_number
+        
+        """
         sample = self.parse_sample(index)
         image = Image.open(sample.path)
-        return self.Batch(image=image,
-                          target=getattr(sample, self.y_col),
-                          path=getattr(sample, self.x_col),
-                          catalog_number=getattr(sample, self.id_col))
-
+        metadata={
+                  "path":getattr(sample, self.x_col),
+                  "catalog_number":getattr(sample, self.id_col)
+                 }
+        return Batch(image=image,
+                     target=getattr(sample, self.y_col),
+                     metadata=metadata)
+    
 
     def __getitem__(self, index: int):
         
         item = self.fetch_item(index)
-        image, target, path, catalog_number = item.image, item.target, item.path, item.catalog_number
+        image, target, metadata = item.image, item.target, item.metadata
         target = self.label_encoder.class2idx[target]
         
         if self.transform is not None:
@@ -410,10 +421,9 @@ class CustomDataset(torchdata.datasets.Files): # (CommonDataset):
         if self.target_transform is not None:
             target = self.target_transform(target)
         
-        return self.Batch(image=image,
-                          target=target,
-                          path=path,
-                          catalog_number=catalog_number)
+        return Batch(image=image,
+                     target=target,
+                     metadata=metadata)
         
     def setup(self,
               samples_df: pd.DataFrame=None,

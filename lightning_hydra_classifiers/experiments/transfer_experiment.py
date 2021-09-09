@@ -72,18 +72,20 @@ class TransferExperiment:
         dataset_path = list(A_minus_B_dir.glob("./*full_dataset.csv"))[0]
         config = CSVDatasetConfig.load(path = config_path)
         dataset = CSVDataset.from_config(config, eager_encode_targets=False)
+        dataset.config.task_tag = "Extant_10_512"
         ##########################################
         extant_minus_pnas_dataset = dataset
         A_minus_B_data_splits = DataSplitter.create_trainvaltest_splits(data=extant_minus_pnas_dataset,
                                                                         val_split=0.2,
                                                                         test_split="test",
                                                                         shuffle=True,
-                                                                        seed=3654,
+                                                                        seed=self.seed,
                                                                         stratify=True)
 
         test_config_path = A_minus_B_dir / "A_in_B-CSVDataset-config.yaml"
         test_config = CSVDatasetConfig.load(path = test_config_path)
         test_dataset = CSVDataset.from_config(test_config, eager_encode_targets=False)
+        test_dataset.config.task_tag = "Extant_10_512"
         A_minus_B_data_splits['test'] = test_dataset
         task_0 = A_minus_B_data_splits
         return task_0
@@ -110,18 +112,21 @@ class TransferExperiment:
         config_path = list(B_minus_A_dir.glob("./CSVDataset-config.yaml"))[0]
         config = CSVDatasetConfig.load(path = config_path)
         dataset = CSVDataset.from_config(config)
+        dataset.config.task_tag = "PNAS_100_512"
+        print(f"dataset.config.task_tag: {dataset.config.task_tag}")
         ##########################################
         pnas_minus_extant_dataset = dataset
         B_minus_A_data_splits = DataSplitter.create_trainvaltest_splits(data=pnas_minus_extant_dataset,
                                                                         val_split=0.2,
                                                                         test_split="test",
                                                                         shuffle=True,
-                                                                        seed=3654,
+                                                                        seed=self.seed,
                                                                         stratify=True)
 
         test_config_path = B_minus_A_dir / "A_in_B-CSVDataset-config.yaml"
         test_config = CSVDatasetConfig.load(path = test_config_path)
         test_dataset = CSVDataset.from_config(test_config)
+        test_dataset.config.task_tag = "PNAS_100_512"
         B_minus_A_data_splits['test'] = test_dataset
         task_1 = B_minus_A_data_splits
 
@@ -143,9 +148,7 @@ class TransferExperiment:
         task_0_label_encoder.__init__(replacements = replace_class_indices)
 
         task_0_label_encoder.fit(task_0['test'].targets)
-#         print(len(task_0_label_encoder.classes))
         task_0_label_encoder.fit(task_0['train'].targets)
-#         print(len(task_0_label_encoder.classes))
 
         task_0['val'].label_encoder = task_0_label_encoder
         task_0['test'].label_encoder = task_0_label_encoder

@@ -53,12 +53,16 @@ def get_per_class_metrics(num_classes: int,
                 'all': normalization over the whole matrix
     """
     
-    default = {'F1': metrics.F1(num_classes=num_classes, average=None),
-               'ConfusionMatrix': metrics.ConfusionMatrix(num_classes=num_classes, normalize=normalize)}
+    default = {'F1': metrics.F1(num_classes=num_classes, average=None)}#,
+#                'ConfusionMatrix': metrics.ConfusionMatrix(num_classes=num_classes, normalize=normalize)}
+    
     
     if len(prefix)>0:
         for k in list(default.keys()):
-            default[prefix + r'/' + k] = default[k]
+            default[prefix + r'/per_class/' + k] = default[k]
             del default[k]
+    
+    
+    
     
     return metrics.MetricCollection(default)
