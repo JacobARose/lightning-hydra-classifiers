@@ -71,6 +71,7 @@ def build_model(model_name: str,
         pp(AVAILABLE_MODELS)
         return None
     
+    model = model.model
     
     model.name = model_name
     model.pretrained = pretrained

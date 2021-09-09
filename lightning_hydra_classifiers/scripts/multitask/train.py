@@ -192,7 +192,7 @@ def train_task(config: argparse.Namespace, task_id: int=0):
                                                                      model=model,
                                                                      datamodule=datamodule,
                                                                      config=config,
-                                                                     results_path = config.stages[f"task_{task_id}"].lr_tuner_results_path,
+                                                                     results_dir = config.stages[f"task_{task_id}"].lr_tuner_dir,
                                                                      group=f'{config.model.model_name}_task_{task_id}')
 #                                                                      run=run)
         
@@ -414,7 +414,7 @@ def cmdline_args(arg_overrides=None):
     else:
         task_tags = config.stages.task_0.name
         
-    import pdb; pdb.set_trace()
+#     import pdb; pdb.set_trace()
     if config.model.pretrained in ("imagenet", True):
         weights_name = "imagenet_weights"
     else:
@@ -426,10 +426,25 @@ def cmdline_args(arg_overrides=None):
     for task in config.stages.keys():
         if config.stages[task] is None: continue
         config.stages[task].model_ckpt_dir = str(Path(config.experiment_dir, task, "checkpoints"))
-        config.stages[task].lr_tuner_results_path = str(Path(config.experiment_dir, task, "lr_tuner","hparams.yaml"))
+        config.stages[task].lr_tuner_dir = str(Path(config.experiment_dir, task, "lr_tuner"))
+        config.stages[task].lr_tuner_results_path = str(Path(config.stages[task].lr_tuner_dir, "results.csv"))
+        config.stages[task].lr_tuner_hparams_path = str(Path(config.stages[task].lr_tuner_dir, "hparams.yaml"))
 
+        
+    config.lr_tuner = OmegaConf.structured(lr_tuner.LRTunerConfig(min_lr = 1e-07,
+                                                                  max_lr = 1.2,
+                                                                  num_training = 150,
+                                                                  mode = 'exponential',
+                                                                  early_stop_threshold = 8.0))
+
+        
 
     return args, config
+
+
+
+
+
 
 
 
@@ -455,7 +470,7 @@ if __name__ == '__main__':
         #TODO Log/Cache experiment artifacts here.    
         results["task_1"], config = train_task(config=config, task_id=1)
         
-    import json
+    
     print(f"[SUCCESSFULLY FINISHED TRAIN.PY]")
     torch.save(results, str(Path(config.experiment_dir, "test_results.pth")))
     logger.info(json.dumps(results))
