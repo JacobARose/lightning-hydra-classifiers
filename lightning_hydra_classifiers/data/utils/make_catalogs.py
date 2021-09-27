@@ -26,6 +26,9 @@ python "/media/data/jacob/GitHub/lightning-hydra-classifiers/lightning_hydra_cla
 python "/media/data/jacob/GitHub/lightning-hydra-classifiers/lightning_hydra_classifiers/data/utils/make_catalogs.py" --make_original
 
 
+python "/media/data/jacob/GitHub/lightning-hydra-classifiers/lightning_hydra_classifiers/data/utils/make_catalogs.py" --make_extant
+
+
 """
 
 import argparse
@@ -308,7 +311,7 @@ def make_extant(args):
     version = args.version
 
     base_dataset_name = "Extant_Leaves"
-    thresholds = [10,100]
+    thresholds = [None, 3, 10,100]
     resolutions = [512,1024]
     path_schema = "{family}_{genus}_{species}_{collection}_{catalog_number}"
 
