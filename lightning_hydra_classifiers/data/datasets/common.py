@@ -23,7 +23,7 @@ import os
 import random
 import textwrap
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from itertools import chain, repeat
 from functools import cached_property
 from pathlib import Path
@@ -47,12 +47,12 @@ from torchvision import transforms
 from torchvision.datasets import ImageFolder, folder, vision
 from torchvision.transforms import functional as F
 
-from lightning_hydra_classifiers.utils.dataset_management_utils import Extract as ExtractBase
+# from lightning_hydra_classifiers.utils.dataset_management_utils import ETL as ETLBase
+from lightning_hydra_classifiers.utils.etl_utils import ETL as ETLBase
 from lightning_hydra_classifiers.utils import template_utils
 from lightning_hydra_classifiers.utils.common_utils import filter_df_by_threshold, Batch
-from lightning_hydra_classifiers.utils.dataset_management_utils import (save_config,
-                                                                        load_config,
-                                                                        LabelEncoder,
+from lightning_hydra_classifiers.data import catalog_registry
+from lightning_hydra_classifiers.utils.dataset_management_utils import (LabelEncoder,
                                                                         DataSplitter,
                                                                         export_image_data_diagnostics,
                                                                         export_dataset_to_csv,
@@ -64,7 +64,7 @@ from lightning_hydra_classifiers.utils.plot_utils import colorbar, display_image
 
 log = template_utils.get_logger(__name__)
 
-__all__ = ['PathSchema', 'SampleSchema', 'Batch', 'totensor', 'toPIL', 'CSVDatasetConfig', 'CSVDataset']
+__all__ = ['PathSchema', 'SampleSchema', 'Batch', 'totensor', 'toPIL', 'CSVDatasetConfig', 'CSVDataset', "ETL"]
 
 
 @dataclass 
@@ -120,7 +120,7 @@ toPIL: Callable = torchvision.transforms.ToPILImage("RGB")
 
 
 
-class Extract(ExtractBase):
+class ETL(ETLBase):
     
     @classmethod
     def export_dataset_state(cls,
@@ -207,13 +207,13 @@ class BaseConfig:
         
         cfg = asdict(self)
 #         cfg = DictConfig({k: getattr(self,k) for k in self.keys()})
-        Extract.config2yaml(cfg, path)
+        ETL.config2yaml(cfg, path)
     
     @classmethod
     def load(cls,
              path: Union[str, Path]) -> "DatasetConfig":
 
-        cfg = Extract.config_from_yaml(path)
+        cfg = ETL.config_from_yaml(path)
 
 #         keys = cls.__dataclass_fields__.keys()
         cfg = cls(**{k: cfg[k] for k in cls.keys()})
@@ -233,12 +233,15 @@ class BaseConfig:
     
 @dataclass
 class DatasetConfig(BaseConfig):
-    base_dataset_name: str = "Extant_Leaves"
+    base_dataset_name: str = "" # "Extant_Leaves"
     class_type: str = "family"
     threshold: Optional[int] = 10
     resolution: int = 512
     version: str = "v1_0"
     path_schema: str = "{family}_{genus}_{species}_{collection}_{catalog_number}"
+    
+    def __post_init__(self):
+        assert self.version in self.available_versions
     
     @property
     def available_versions(self) -> List[str]:
@@ -246,11 +249,18 @@ class DatasetConfig(BaseConfig):
 
     @property
     def full_name(self) -> str:
-        name  = self.base_dataset_name
+        name = []
+        if len(self.base_dataset_name):
+            name.append(self.base_dataset_name)
         if self.threshold:
-            name += f"_{self.class_type}_{self.threshold}"
-        name += f"_{self.resolution}"
-        return name
+            name.extend([str(self.class_type), str(self.threshold)])
+        name.append(str(self.resolution))
+        return "_".join(name)
+#         name  = self.base_dataset_name
+#         if self.threshold:
+#             name += f"_{self.class_type}_{self.threshold}"
+#         name += f"_{self.resolution}"
+#         return name
 
     
 class ImageFileDatasetConfig(DatasetConfig):    
@@ -275,7 +285,7 @@ class ImageFileDatasetConfig(DatasetConfig):
         return [os.path.join(self.root_dir, subset) for subset in self.subsets]
 
     def locate_files(self) -> Dict[str, List[Path]]:
-        return Extract.locate_files(self.root_dir)
+        return ETL.locate_files(self.root_dir)
 
     @cached_property
     def num_samples(self):
@@ -321,11 +331,11 @@ class CSVDatasetConfig(BaseConfig):
         return out
 
     def locate_files(self) -> pd.DataFrame:
-        return Extract.df_from_csv(self.data_path)
+        return ETL.df_from_csv(self.data_path)
     
     def load_label_encoder(self) -> Union[None, LabelEncoder]:
         if os.path.exists(str(self.label_encoder_path)):
-            return Extract.labels_from_json(str(self.label_encoder_path))
+            return ETL.labels_from_json(str(self.label_encoder_path))
         return
 
     @classmethod
@@ -336,7 +346,7 @@ class CSVDatasetConfig(BaseConfig):
                              encoder: LabelEncoder=None,
                              dataset_name: Optional[str]="dataset"
                              ) -> None:
-        Extract.export_dataset_state(output_dir=output_dir,
+        ETL.export_dataset_state(output_dir=output_dir,
                                      df=df,
                                      config=config,
                                      encoder=encoder,
@@ -348,7 +358,7 @@ class CSVDatasetConfig(BaseConfig):
                              config_path: Optional[Union[Path, str]]=None,
                             ) -> Tuple["CSVDataset", "CSVDatasetConfig"]:
 
-        return Extract.import_dataset_state(data_dir=data_dir,
+        return ETL.import_dataset_state(data_dir=data_dir,
                                             config_path=config_path)
 
 
