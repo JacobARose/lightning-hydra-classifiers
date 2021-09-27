@@ -21,15 +21,43 @@ from omegaconf import DictConfig, OmegaConf
 from torch import nn
 import torch
 import re
-from typing import Union, Optional, List
+from typing import Union, Optional, List, Tuple
+from lightning_hydra_classifiers.models.heads import ClassifierHead
 from lightning_hydra_classifiers.models.backbones import backbone
 from lightning_hydra_classifiers.utils.metric_utils import get_per_class_metrics, get_scalar_metrics
 
+from lightning_hydra_classifiers.experiments.configs.model import *
+# from lightning_hydra_classifiers.experiments.configs.trainer import *
 
-__all__ = ["LitMultiTaskModule"]
+
+__all__ = ["LitMultiTaskModule"]#, "AdamWOptimizerConfig", "AdamOptimizerConfig"]
+
+
+
+
+from dataclasses import dataclass
+
+
+# @dataclass
+# class OptimizerConfig:
+#     lr: float = 0.001
+#     betas: Tuple[float] = (0.9, 0.999)
+#     eps: float = 1e-08
+#     weight_decay: float = 0.01
+#     amsgrad: bool = False
+
+# @dataclass
+# class AdamWOptimizerConfig(OptimizerConfig):
+#     _target_
+#     weight_decay: float = 0.01
+
+# @dataclass
+# class AdamOptimizerConfig(OptimizerConfig):
+#     weight_decay: float = 0.0
 
 
 def _is_pool_type(l): return re.search(r'Pool[123]d$', l.__class__.__name__)
+
 def has_pool_type(m: nn.Module) -> bool:
     "Return `True` if `m` is a pooling layer or has one in its children"
     if _is_pool_type(m): return True
@@ -38,29 +66,133 @@ def has_pool_type(m: nn.Module) -> bool:
     return False
 
 
+AVAILABLE_GLOBAL_POOL_LAYERS = {"avg":nn.AdaptiveAvgPool2d,
+                                "max":nn.AdaptiveMaxPool2d}
+
+
+# @dataclass(unsafe_hash=True)
+# class ClassifierConfig:
+#     in_features: Optional[int] = None
+#     num_classes: Optional[int] = None
+
+# @dataclass(unsafe_hash=True)
+# class MultiTaskClassifierConfig:
+#     task_0: ClassifierConfig = ClassifierConfig(None, num_classes=91)
+#     task_1: ClassifierConfig = ClassifierConfig(None, num_classes=19)
+
+
+# @dataclass(unsafe_hash=True)
+# class BackboneConfig:
+#     backbone_name: str
+#     pretrained: str="imagenet"
+#     global_pool_type: str="avg"
+#     drop_rate: float=0.0
+#     init_freeze_up_to: Optional[str]=None
+        
+# @dataclass(unsafe_hash=True)
+# class LitMultiTaskModuleConfig:
+    
+#     backbone_config: BackboneConfig = BackboneConfig(backbone_name="resnet50")
+#     multitask_config: MultiTaskClassifierConfig = MultiTaskClassifierConfig()
+    
+    
+#     model_name: str
+#     pretrained: Union[str, bool]=False,
+#     progress: bool=True,
+#     num_classes: int=1000,
+#     global_pool_type: str='avg',
+#     drop_rate: float=0.0,
+#     init_freeze_up_to: str=None,
+
+    
+    
+#     model_name: str,
+#     pretrained: Union[str, bool]=False,
+#     progress: bool=True,
+#     num_classes: int=1000,
+#     global_pool_type: str='avg',
+#     drop_rate: float=0.0,
+#     init_freeze_up_to: str=None,
+        
+
+
+        
+        
+
+
+
+
 class LitMultiTaskModule(pl.LightningModule):
     
-    def __init__(self, config): #, ckpt_path: Optional[str]=None):
+    layers = ["backbone", "global_pool", "classifier"]
+    
+    def __init__(self, config: LitMultiTaskModuleConfig):
         super().__init__()
-#         config = Munch(config)
         self.config = config
-#         self.lr = config.lr
-#         self.num_classes = self.config.num_classes
-        self.save_hyperparameters({"config":dict(self.config)})
+        self.save_hyperparameters({
+                                   "config":asdict(self.config)
+        })
+        self.heads = {}
+        self.init_backbone(config=self.config.backbone_config)
+        self.config.multitask_config.task_0.out_features = self.out_features
+        self.config.multitask_config.task_1.out_features = self.out_features
         
-        self.init_model(self.config)
+        self.init_classifier(key="task_0",
+                             config=self.config.multitask_config.task_0)
+        self.init_classifier(key="task_1",
+                             config=self.config.multitask_config.task_1)
+        self.set_current_classifier(key="task_0")        
+        
         self.metrics = self.init_metrics(stage='all')
         self.criterion = nn.CrossEntropyLoss()
-
-    def update_config(self, config):
-        self.config = OmegaConf.merge(dict(self.config), dict(config))
         
-    def forward(self, x, *args, **kwargs):
+    def features(self, x):
         x = self.backbone(x)
         x = self.global_pool(x)
-        x = x.view(x.size(0),-1)
+        return x
+        
+    def forward(self, x):
+        x = self.features(x)
+        x = torch.flatten(x, start_dim=1)
         x = self.classifier(x)
         return x
+
+    def init_classifier(self,
+                        key: str,
+                        config: ClassifierConfig):
+        self.heads[key] = ClassifierHead(in_features=config.out_features,
+                                         num_classes=config.num_classes)        
+        
+    def set_current_classifier(self,
+                               key: str):
+        assert key in heads
+        self.classifier = self.heads[key]
+    
+    def init_backbone(self,
+                      config: BackboneConfig,
+                      **kwargs):
+        
+
+        GlobalPoolFactory = AVAILABLE_GLOBAL_POOL_LAYERS[config.global_pool_type]
+        self.backbone = backbone.build_model(model_name=config.backbone_name,
+                                             pretrained=config.pretrained,
+#                                              num_classes=num_classes,
+#                                              global_pool_type=config.global_pool_type,
+                                             drop_rate=config.drop_rate)
+
+        self.out_features = self.backbone.out_features
+        self.global_pool = self.backbone.global_pool
+        
+        
+#         self.classifier = self.backbone.classifier
+        
+#         self.global_pool = GlobalPoolFactory(output_size=1) #self.out_features)
+#         self.classifier = ClassifierHead(in_features=self.out_features,
+#                                          num_classes=self.num_classes)
+
+        self.freeze_up_to(self.backbone, layer=config.init_freeze_up_to)
+
+    
 
     @property
     def config(self):
@@ -68,18 +200,21 @@ class LitMultiTaskModule(pl.LightningModule):
     
     @config.setter
     def config(self, config):
-        config = OmegaConf.create(dict(config))
+        config = OmegaConf.structured(config)
+#         config = OmegaConf.create(dict(config))
         self._config = config
+        self.tasks = list(config.multitask_config.__dataclass_fields__.keys())
 #         self.hparams.config.update(config)
         self.lr = config.lr
+        self.weight_decay = config.weight_decay
         self.num_classes = config.num_classes
     
     def configure_optimizers(self):
         print(f"self.hparams={self.hparams}")
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)#hparams.lr)
+        self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.lr, weight_decay=self.weight_decay)#hparams.lr)
 #         self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=self.config.t_max, eta_min=self.config.min_lr)
 
-        return {'optimizer': self.optimizer}#, 'lr_scheduler': self.scheduler}
+        return {'optimizer': self.optimizer}
 
     def step(self, batch, batch_idx):
         image, y_true = batch[0], batch[1]
@@ -129,13 +264,13 @@ class LitMultiTaskModule(pl.LightningModule):
                                 y_true,
                                 stage="train")
         self.log_dict({"train_loss": loss,
-                       'lr': self.optimizer.param_groups[0]['lr']},
+                       "train_acc": self.metrics_train["train/acc_top1"]},
                        on_step=True, on_epoch=True, prog_bar=True, logger=True)
-        self.log("train_acc", self.metrics_train["train/acc_top1"],
+        self.log_dict({'lr': self.optimizer.param_groups[0]['lr']},
                  on_step=False, on_epoch=True, prog_bar=True, logger=True)
         self.log_metric_step(stage='train',
                              omit_metric_types=None,
-                             omit_metric_keys=None)
+                             omit_metric_keys=["train/acc_top1"])
         
 #         self.log_dict(self.metrics_train,
 #                  on_step=False, on_epoch=True, prog_bar=True, logger=True)
@@ -153,7 +288,7 @@ class LitMultiTaskModule(pl.LightningModule):
         self.log("val_loss", loss,
                   on_step=True, on_epoch=True, prog_bar=True, logger=True)
         self.log("val_acc", self.metrics_val["val/acc_top1"],
-                 on_step=False, on_epoch=True, prog_bar=True, logger=True)
+                 on_step=True, on_epoch=True, prog_bar=True, logger=True)
         self.log_metric_step(stage='val',
                              omit_metric_types=None,
                              omit_metric_keys=["val/acc_top1"])
@@ -192,39 +327,6 @@ class LitMultiTaskModule(pl.LightningModule):
         if "fc" in children:
             return "fc"
         return None
-    
-
-
-
-#     @classmethod
-#     def get_default_global_pool_key(cls, model: nn.Module):
-#         # source: https://github.com/fastai/fastai/blob/master/fastai/vision/learner.py#L17
-# #         def has_pool_type(m: nn.Module) -> bool
-#         children = OrderedDict(model.named_children())#.keys()
-#         if "classifier" in children:
-#             return "classifier"
-#         if "fc" in children:
-#             return "fc"
-#         return None
-        
-    
-    def init_model(self, config):
-        model = backbone.build_model(model_name=config.model_name,
-                                           pretrained=config.pretrained,
-                                           num_classes=config.num_classes)
-        head_key = self.get_default_classifier_key(model)
-        layers = OrderedDict(model.named_children())
-        self.backbone = nn.Sequential(OrderedDict({k:v for k,v in layers.items() if k not in ["global_pool", "avgpool", head_key]}))
-        if "global_pool" in layers:
-            self.global_pool = layers["global_pool"]
-        elif "avgpool" in layers:
-            self.global_pool = layers["avgpool"]
-        self.classifier = layers[head_key]
-        self.model = nn.Sequential(OrderedDict({"backbone":self.backbone,
-                                                "global_pool":self.global_pool,
-                                                "classifier":self.classifier}))
-        
-        self.freeze_up_to(self.model, layer=config.init_freeze_up_to)
         
         
     @classmethod
@@ -238,10 +340,9 @@ class LitMultiTaskModule(pl.LightningModule):
             
 #         self.model.enable_grad = True
         model.requires_grad = True
-        if not layer:
+        if layer in [None, 0]:
             return
         for i, (name, param) in enumerate(model.named_parameters()):
-            
             if isinstance(layer, int):
                 if layer == i:
                     break
@@ -290,14 +391,62 @@ class LitMultiTaskModule(pl.LightningModule):
     @classmethod
     def available_backbones(self):
         return backbone.AVAILABLE_MODELS
+
+
+#     def show_batch(self, win_size=(10, 10)):
+
+#         def _to_vis(data):
+#             return tensor_to_image(torchvision.utils.make_grid(data, nrow=8))
+
+#         # get a batch from the training set: try with `val_datlaoader` :)
+#         imgs, labels = next(iter(self.train_dataloader()))
+#         imgs_aug = self.transform(imgs)  # apply transforms
+#         # use matplotlib to visualize
+#         plt.figure(figsize=win_size)
+#         plt.imshow(_to_vis(imgs))
+#         plt.figure(figsize=win_size)
+#         plt.imshow(_to_vis(imgs_aug))
+
+
+    
+########################################
+# source: https://github.com/PyTorchLightning/pytorch-lightning/pull/5468
+    
+# class MyDataset(RandomDataset):
+
+#     def __getitem__(self, index):
+#         return {"index": index, "batch": self.data[index]}   
+
+# class MyModel(LightningModule):
+
+#     def test_step(self, batch, batch_idx, dataloader_idx=None):
+#         x = batch["batch"]
+#         output = self.layer(x)
+#         loss = self.loss(batch, output)
+
+#         # need to provide a key `id` being a number.
+#         self.add_predictions([
+#             {"id": idx.item(), "predictions": o} 
+#             for idx, o in zip(batch["index"], output)])
+
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
     
     
     
     
     
 
-        
-        
+
+
 #         y_logit, y_true, y_pred = self.step(batch, batch_idx)
 #         return {'test_loss': F.cross_entropy(y_hat, y)}
 
@@ -311,3 +460,38 @@ class LitMultiTaskModule(pl.LightningModule):
 #         avg_loss = torch.stack([x['test_loss'] for x in outputs]).mean()
 #         logs = {'test_loss': avg_loss}
 #         return {'test_loss': avg_loss, 'log': logs, 'progress_bar': logs}
+
+
+
+# class ClassifierPool:
+"""
+
+Mon Sept 13th, 2021: Eh, maybe wont go ahead with this particular abstraction.
+"""
+#     __heads: OrderedDict = OrderedDict({})
+    
+#     @property
+#     def heads(self):
+#         return self.__heads
+    
+#     @property
+#     def current_head(self):
+#         return self.heads[self.current_name]    
+    
+#     def add_head(self, head: ClassifierHead, name: str):
+#         assert isinstance(head, ClassifierHead)
+#         if name in self.heads:
+#             logger.info(f"Replacing classifier head: {name}")
+#             del self.__heads[name]
+#         self.__heads[name] = head
+#         self.set_current_head(name=name)
+    
+#     def set_current_head(self, name: Union[int, str]):
+#         assert name in self.heads
+#         self.current_name = name
+#         logger.info(f"Setting current classifier head to be: {name}")
+    
+# self.classifier_pool = ClassifierPool()
+
+# self.classifier = ClassifierHead(in_features=self.out_features,
+#                                  num_classes=num_classes)
