@@ -3,8 +3,13 @@ lightning_hydra_classifiers/experiments/transfer_experiments.py
 
 
 python "/media/data/jacob/GitHub/lightning-hydra-classifiers/lightning_hydra_classifiers/experiments/transfer_experiment.py" \
-                                                                -out "/media/data_cifs/projects/prj_fossils/users/jacob/experiments/July2021-Nov2021/csv_datasets/leavesdb-v1_0" \
-                                                                -exp_name "Extant-to-PNAS-512-transfer_benchmark"
+                -exp "/media/data_cifs/projects/prj_fossils/users/jacob/experiments/July2021-Nov2021/csv_datasets/experimental_datasets" \
+                -exp_name "Extant-to-PNAS-512-transfer_benchmark"
+                
+                
+python "/media/data/jacob/GitHub/lightning-hydra-classifiers/lightning_hydra_classifiers/experiments/transfer_experiment.py" \
+                -exp "/media/data_cifs/projects/prj_fossils/users/jacob/experiments/July2021-Nov2021/csv_datasets/experimental_datasets" \
+                -exp_name "Extant-to-Fossil-512-transfer_benchmark"
 
 Created on: Sunday, August 30th, 2021
 Author: Jacob A Rose
@@ -12,28 +17,79 @@ Author: Jacob A Rose
 
 """
 
-
+from rich import print as pp
 import argparse
+from dataclasses import dataclass, asdict
 from munch import Munch
 import os
 from pathlib import Path
-from typing import Tuple, Dict
+from typing import Tuple, Dict, Optional
 
 from lightning_hydra_classifiers.data.utils.make_catalogs import CSV_CATALOG_DIR_V1_0, EXPERIMENTAL_DATASETS_DIR
 from lightning_hydra_classifiers.data.datasets.common import CSVDatasetConfig, CSVDataset, DataSplitter
-
+from lightning_hydra_classifiers.utils.etl_utils import ETL
 
 ### TBD JACOB
 # from lightning_hydra_classifiers.experiments.configs # .base import BaseConfig
 
-__all__ = ["TransferExperiment"]
+__all__ = ["TransferExperiment", "TransferExperimentConfig", "Extant_to_PNAS_ExperimentConfig", "Extant_to_Fossil_ExperimentConfig", "TaskConfig"]
 
 
-# @dataclass
-# class TransferExperimentConfig:
-#     source_root_dir: str = CSV_CATALOG_DIR_V1_0
-#     experiment_root_dir: str = EXPERIMENTAL_DATASETS_DIR #"/media/data/jacob/GitHub/lightning-hydra-classifiers/notebooks/experiments_August_2021"
-#     experiment_name: str = "Extant-to-PNAS-512-transfer_benchmark"
+
+@dataclass
+class TaskConfig:
+    name: str
+    val_split: Optional[float] = 0.2
+    test_split: Optional[float] = None
+        
+
+@dataclass
+class TransferExperimentConfig:
+    source_root_dir: str = CSV_CATALOG_DIR_V1_0
+    experiment_root_dir: str = EXPERIMENTAL_DATASETS_DIR # '/media/data_cifs/projects/prj_fossils/users/jacob/experiments/July2021-Nov2021/csv_datasets/experimental_datasets',
+    experiment_name: Optional[str] = None
+    task_0: Optional[TaskConfig] = None
+    task_1: Optional[TaskConfig] = None
+        
+    task_0_name: Optional[str] = None
+    task_1_name: Optional[str] = None
+    seed: int = 99
+        
+
+@dataclass
+class Extant_to_PNAS_ExperimentConfig(TransferExperimentConfig):
+    experiment_name: str = "Extant-to-PNAS-512-transfer_benchmark"
+    task_0: Optional[TaskConfig] = TaskConfig(name = 'Extant_Leaves_family_10_512_minus_PNAS_family_100_512',
+                                              val_split = 0.2,
+                                              test_split = None)
+    task_1: Optional[TaskConfig] = TaskConfig(name = 'PNAS_family_100_512_minus_Extant_Leaves_family_10_512',
+                                              val_split = 0.2,
+                                              test_split = None)        
+        
+    task_0_name: str = 'Extant_Leaves_family_10_512_minus_PNAS_family_100_512'
+    task_1_name: str = 'PNAS_family_100_512_minus_Extant_Leaves_family_10_512'
+
+        
+@dataclass
+class Extant_to_Fossil_ExperimentConfig(TransferExperimentConfig):
+    experiment_name: str = "Extant-to-Fossil-512-transfer_benchmark"
+        
+    task_0: Optional[TaskConfig] = TaskConfig(name = "Extant_Leaves_family_3_512",
+                                              val_split = 0.2,
+                                              test_split = 0.3)
+    task_1: Optional[TaskConfig] = TaskConfig(name = "Fossil_family_3_512",
+                                              val_split = 0.2,
+                                              test_split = 0.3)
+
+        
+    task_0_name: str = "Extant_Leaves_family_3_512"
+    task_1_name: str = "Fossil_family_3_512"
+
+
+
+
+        
+        
 
 
 class TransferExperiment:
@@ -46,22 +102,26 @@ class TransferExperiment:
         
     def parse_config(self,
                      config):
-        config = config or Munch()
-        if "source_root_dir" not in config:
+        config = config or TransferExperimentConfig()#Munch()
+        if "source_root_dir" not in asdict(config):
             config.source_root_dir = CSV_CATALOG_DIR_V1_0
-        if "experiment_dir" not in config:
+        if "experiment_dir" not in asdict(config):
             config.experiment_root_dir = EXPERIMENTAL_DATASETS_DIR #"/media/data/jacob/GitHub/lightning-hydra-classifiers/notebooks/experiments_August_2021"
-        if "experiment_name" not in config:
+        if "experiment_name" not in asdict(config) or config.experiment_name is None:
             config.experiment_name = "Extant-to-PNAS-512-transfer_benchmark"
-            config.task_0_name = "Extant_Leaves_family_10_512_minus_PNAS_family_100_512"
-            config.task_1_name = "PNAS_family_100_512_minus_Extant_Leaves_family_10_512"
+#             config.task_0_name = "Extant_Leaves_family_10_512_minus_PNAS_family_100_512"
+#             config.task_1_name = "PNAS_family_100_512_minus_Extant_Leaves_family_10_512"
+        if "seed" not in asdict(config):
+            config.seed = 99
 
         self.source_root_dir = config.source_root_dir
         self.experiment_root_dir = config.experiment_root_dir
         self.experiment_name = config.experiment_name
         self.experiment_dir = Path(self.experiment_root_dir, self.experiment_name)
-        self.task_0_name = config.task_0_name
-        self.task_1_name = config.task_1_name
+        self.task_0 = config.task_0
+        self.task_1 = config.task_1
+#         self.task_0_name = config.task_0_name
+#         self.task_1_name = config.task_1_name
         self.seed = config.seed
         
         self.config = config
@@ -85,9 +145,9 @@ class TransferExperiment:
         
         
         source_root_dir = self.source_root_dir
-        A_minus_B_dir = Path(source_root_dir, self.task_0_name)
-#         import pdb;pdb.set_trace()
-#         pp(vars())
+#         A_minus_B_dir = Path(source_root_dir, self.task_0_name)
+        A_minus_B_dir = Path(source_root_dir, self.task_0.name)
+
         config_path = list(A_minus_B_dir.glob("./CSVDataset-config.yaml"))[0]
         dataset_path = list(A_minus_B_dir.glob("./*full_dataset.csv"))[0]
         config = CSVDatasetConfig.load(path = config_path)
@@ -96,17 +156,18 @@ class TransferExperiment:
         ##########################################
         extant_minus_pnas_dataset = dataset
         A_minus_B_data_splits = DataSplitter.create_trainvaltest_splits(data=extant_minus_pnas_dataset,
-                                                                        val_split=0.2,
-                                                                        test_split="test",
+                                                                        val_split=self.task_0.val_split,
+                                                                        test_split=self.task_0.test_split,
                                                                         shuffle=True,
                                                                         seed=self.seed,
                                                                         stratify=True)
 
-        test_config_path = A_minus_B_dir / "A_in_B-CSVDataset-config.yaml"
-        test_config = CSVDatasetConfig.load(path = test_config_path)
-        test_dataset = CSVDataset.from_config(test_config, eager_encode_targets=False)
-#         test_dataset.config.task_tag = "Extant_10_512"
-        A_minus_B_data_splits['test'] = test_dataset
+        if "test" not in A_minus_B_data_splits:
+            test_config_path = A_minus_B_dir / "A_in_B-CSVDataset-config.yaml"
+            test_config = CSVDatasetConfig.load(path = test_config_path)
+            test_dataset = CSVDataset.from_config(test_config, eager_encode_targets=False)
+    #         test_dataset.config.task_tag = "Extant_10_512"
+            A_minus_B_data_splits['test'] = test_dataset
         task_0 = A_minus_B_data_splits
         return task_0
 
@@ -129,26 +190,25 @@ class TransferExperiment:
         """
         
         source_root_dir = self.source_root_dir
-        B_minus_A_dir = Path(source_root_dir, self.task_1_name)
+        B_minus_A_dir = Path(source_root_dir, self.task_1.name)
         config_path = list(B_minus_A_dir.glob("./CSVDataset-config.yaml"))[0]
         config = CSVDatasetConfig.load(path = config_path)
         dataset = CSVDataset.from_config(config)
-#         dataset.config.task_tag = "PNAS_100_512"
-#         print(f"dataset.config.task_tag: {dataset.config.task_tag}")
         ##########################################
         pnas_minus_extant_dataset = dataset
         B_minus_A_data_splits = DataSplitter.create_trainvaltest_splits(data=pnas_minus_extant_dataset,
-                                                                        val_split=0.2,
-                                                                        test_split="test",
+                                                                        val_split=self.task_1.val_split,
+                                                                        test_split=self.task_1.test_split,
                                                                         shuffle=True,
                                                                         seed=self.seed,
                                                                         stratify=True)
 
-        test_config_path = B_minus_A_dir / "A_in_B-CSVDataset-config.yaml"
-        test_config = CSVDatasetConfig.load(path = test_config_path)
-        test_dataset = CSVDataset.from_config(test_config)
-#         test_dataset.config.task_tag = "PNAS_100_512"
-        B_minus_A_data_splits['test'] = test_dataset
+        if "test" not in B_minus_A_data_splits:
+            test_config_path = B_minus_A_dir / "A_in_B-CSVDataset-config.yaml"
+            test_config = CSVDatasetConfig.load(path = test_config_path)
+            test_dataset = CSVDataset.from_config(test_config)
+    #         test_dataset.config.task_tag = "PNAS_100_512"
+            B_minus_A_data_splits['test'] = test_dataset
         task_1 = B_minus_A_data_splits
 
         return task_1
@@ -205,6 +265,11 @@ class TransferExperiment:
                                                   config=task_1[subset].config,
                                                   encoder=task_1_label_encoder,
                                                   dataset_name=subset)
+        
+        exp_config_path = os.path.join(experiment_dir, "experiment.yaml")
+        ETL.config2yaml(self.config, exp_config_path)
+        print(f"[SUCCESS] Experiment files can be found at: {experiment_dir}:")
+        pp(os.listdir(experiment_dir))
     
     
     
@@ -238,6 +303,8 @@ class TransferExperiment:
                 task_0[subset].target_transform = val_target_transform
                 task_1[subset].target_transform = val_target_transform
 
+                
+                
         return task_0, task_1
 
 
@@ -245,10 +312,10 @@ class TransferExperiment:
         
 def cmdline_args():
     p = argparse.ArgumentParser(description="Export a series of dataset artifacts (containing csv catalog, yml config, json labels) for each dataset, provided that the corresponding images are pointed to by one of the file paths hard-coded in catalog_registry.py.")
-    p.add_argument("-out", "--output_dir", dest="output_dir", type=str,
-                   default="/media/data_cifs/projects/prj_fossils/users/jacob/experiments/July2021-Nov2021/csv_datasets/experimental_datasets",
-#                    default="/media/data_cifs/projects/prj_fossils/users/jacob/experiments/July2021-Nov2021/csv_datasets/leavesdb-v1_0",
-                   help="Output root directory. Each unique dataset will be allotted its own subdirectory within this root dir.")
+#     p.add_argument("-out", "--output_dir", dest="output_dir", type=str,
+#                    default="/media/data_cifs/projects/prj_fossils/users/jacob/experiments/July2021-Nov2021/csv_datasets/experimental_datasets",
+# #                    default="/media/data_cifs/projects/prj_fossils/users/jacob/experiments/July2021-Nov2021/csv_datasets/leavesdb-v1_0",
+#                    help="Output root directory. Each unique dataset will be allotted its own subdirectory within this root dir.")
     p.add_argument("-in", "--source_root_dir", dest="source_root_dir", type=str,
                    default = CSV_CATALOG_DIR_V1_0,
                    help="Source root directory. Each unique dataset is expected to contain a nested collection of image files organized in imagenet-format.")
@@ -268,15 +335,21 @@ def cmdline_args():
                    help="Experiment seed.")
     
 
-    config = p.parse_args()
+    args = p.parse_args()
     
-    if config.experiment_name == "Extant-to-PNAS-512-transfer_benchmark":
-        config.task_0_name = "Extant_Leaves_family_10_512_minus_PNAS_family_100_512"
-        config.task_1_name = "PNAS_family_100_512_minus_Extant_Leaves_family_10_512"
     
-    if config.experiment_name == "Extant-to-Fossil-512-transfer_benchmark":
-        config.task_0_name = "Extant_Leaves_512"
-        config.task_1_name = "Fossil_512"
+    
+    if args.experiment_name == "Extant-to-PNAS-512-transfer_benchmark":
+        
+        config = Extant_to_PNAS_ExperimentConfig(**dict(args.__dict__))
+#         config.task_0_name = "Extant_Leaves_family_10_512_minus_PNAS_family_100_512"
+#         config.task_1_name = "PNAS_family_100_512_minus_Extant_Leaves_family_10_512"
+    
+    if args.experiment_name == "Extant-to-Fossil-512-transfer_benchmark":
+        config = Extant_to_Fossil_ExperimentConfig(**dict(args.__dict__))
+        
+#         config.task_0_name = "Extant_Leaves_512"
+#         config.task_1_name = "Fossil_512"
     
     
     
@@ -292,5 +365,5 @@ if __name__ == "__main__":
     
     args = cmdline_args()
     experiment = TransferExperiment(config=args)
-    experiment.export_experiment_spec(output_root_dir=args.output_dir)
+    experiment.export_experiment_spec(output_root_dir=args.experiment_root_dir)
     
