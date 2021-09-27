@@ -153,7 +153,9 @@ class Leavesdbv1_0(LeavesdbBase):
     Extant_Leaves_original: str = "/media/data_cifs/projects/prj_fossils/data/processed_data/leavesdb-v1_0/images/Extant_Leaves/original/full/jpg"
     General_Fossil_original: str = "/media/data_cifs/projects/prj_fossils/data/processed_data/leavesdb-v1_0/images/Fossil/General_Fossil/original/full/jpg"
     Florissant_Fossil_original: str = "/media/data_cifs/projects/prj_fossils/data/processed_data/leavesdb-v1_0/images/Fossil/Florissant_Fossil/original/full/jpg"
-
+    PNAS_family_100_original: str = "/media/data_cifs/projects/prj_fossils/data/processed_data/data_splits/PNAS_family_100"
+    PNAS_original: str = "/media/data_cifs/projects/prj_fossils/data/processed_data/leavesdb-v0_1/PNAS"
+    
     
     PNAS_family_100_512: str = "/media/data_cifs/projects/prj_fossils/data/processed_data/data_splits/PNAS_family_100_512"
     PNAS_family_100_1024: str = "/media/data_cifs/projects/prj_fossils/data/processed_data/data_splits/PNAS_family_100_1024"
@@ -207,6 +209,7 @@ class Leavesdbv1_0(LeavesdbBase):
 
 # ################################
 # ################################
+    original: List[str] = None
     Fossil_512: List[str] = None
     Fossil_1024: List[str] = None
     Fossil_1536: List[str] = None
@@ -217,6 +220,11 @@ class Leavesdbv1_0(LeavesdbBase):
     Fossil_family_3_2048: List[str] = None
 
     def __post_init__(self):
+        
+        self.original: List[str] = [self.Extant_Leaves_original,
+                                    self.General_Fossil_original,
+                                    self.Florissant_Fossil_original]
+                                    # Exclude PNAS_family_100_original b/c it's not really useful for concatenation.
         
         self.Fossil_original: List[str] = [self.General_Fossil_original,
                                            self.Florissant_Fossil_original]
@@ -243,7 +251,8 @@ class Leavesdbv1_0(LeavesdbBase):
     def datasets(self):
         return {"PNAS":self.PNAS,
                 "Extant":self.Extant,
-                "Fossil":self.Fossil}
+                "Fossil":self.Fossil,
+                "all":self.original}
 
     @property
     def tags(self):
@@ -370,6 +379,6 @@ if __name__ == "__main__":
     elif args.display:
         pp(available_datasets())
     else:
-        print(f'Provide either --tags or --diplay if running catalog_registry.py from the command line.')
+        print(f'Provide either --tags or --display if running catalog_registry.py from the command line.')
 
         

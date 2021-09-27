@@ -20,7 +20,10 @@ TODO:
     - Add more flexible configuration
 
 
-python "/media/data/jacob/GitHub/lightning-hydra-classifiers/lightning_hydra_classifiers/data/utils/make_catalogs.py"
+python "/media/data/jacob/GitHub/lightning-hydra-classifiers/lightning_hydra_classifiers/data/utils/make_catalogs.py" --all
+
+
+python "/media/data/jacob/GitHub/lightning-hydra-classifiers/lightning_hydra_classifiers/data/utils/make_catalogs.py" --make_original
 
 
 """
@@ -31,7 +34,9 @@ import shutil
 from copy import deepcopy
 from functools import cached_property
 # from lightning_hydra_classifiers.data.common import PathSchema
-from lightning_hydra_classifiers.utils.dataset_management_utils import Extract as ExtractBase
+# from lightning_hydra_classifiers.utils.dataset_management_utils import Extract as ExtractBase
+# from lightning_hydra_classifiers.utils.etl_utils import ETL as ETLBase
+
 # from lightning_hydra_classifiers.utils.common_utils import LabelEncoder
 from IPython.display import display
 
@@ -48,8 +53,9 @@ import collections
 from PIL import Image
 import torch
 import torchdata
-from lightning_hydra_classifiers.data.utils import catalog_registry
-from lightning_hydra_classifiers.data.datasets.common import PathSchema, SampleSchema, CSVDatasetConfig, CSVDataset
+# from lightning_hydra_classifiers.data.utils import catalog_registry
+from lightning_hydra_classifiers.data.datasets.common import PathSchema, SampleSchema, CSVDatasetConfig, CSVDataset, ImageFileDatasetConfig, ImageFileDataset
+from lightning_hydra_classifiers.data.datasets.common import ETL
 from lightning_hydra_classifiers.utils.common_utils import (DataSplitter,
                                                             LabelEncoder,
                                                             trainval_split,
@@ -114,7 +120,7 @@ def export_dataset_catalog_configuration(output_dir: str = "/media/data_cifs/pro
     csv_config_out_path = os.path.join(out_dir,"CSVDataset-config.yaml")
 
     dataset = ImageFileDataset.from_config(image_file_config, subset_keys=['all'])
-    Extract.df2csv(dataset.samples_df,
+    ETL.df2csv(dataset.samples_df,
                    path = csv_out_path)
     image_file_config.save(image_file_config_out_path)
 
@@ -169,7 +175,7 @@ def export_composite_dataset_catalog_configuration(output_dir: str = ".",
                                    dataset_B)
     csv_dataset_pathname = f"{csv_config_A.full_name}_in_{csv_config_B.full_name}"
     csv_dataset_out_path = os.path.join(out_dir, csv_dataset_pathname + ".csv")        
-    Extract.df2csv(A_in_B,
+    ETL.df2csv(A_in_B,
                    path = csv_dataset_out_path)
     A_in_B_config = CSVDatasetConfig(full_name = csv_dataset_pathname,
                                      data_path = csv_dataset_out_path,
@@ -183,7 +189,7 @@ def export_composite_dataset_catalog_configuration(output_dir: str = ".",
 
     csv_dataset_pathname = f"{csv_config_B.full_name}_in_{csv_config_A.full_name}"
     csv_dataset_out_path = os.path.join(out_dir, csv_dataset_pathname + ".csv")
-    Extract.df2csv(B_in_A,
+    ETL.df2csv(B_in_A,
                    path = csv_dataset_out_path)
     B_in_A_config = CSVDatasetConfig(full_name = csv_dataset_pathname,
                                      data_path = csv_dataset_out_path,
@@ -203,7 +209,7 @@ def export_composite_dataset_catalog_configuration(output_dir: str = ".",
 
     csv_dataset_pathname = f"{full_name}-full_dataset"
     csv_dataset_out_path = os.path.join(out_dir, csv_dataset_pathname + ".csv")
-    Extract.df2csv(dataset_A_composed_B,
+    ETL.df2csv(dataset_A_composed_B,
                    path = csv_dataset_out_path)
     ####################
     ####################
@@ -235,6 +241,38 @@ def export_composite_dataset_catalog_configuration(output_dir: str = ".",
 ############################################
 ############################################
 ############################################
+
+
+def make_all_original(args):
+#     if "output_dir" not in args:
+#         args.output_dir = "/media/data_cifs/projects/prj_fossils/users/jacob/experiments/July2021-Nov2021/csv_datasets/leavesdb-v0_3"
+
+    output_dir = args.output_dir
+    version = args.version
+
+    base_dataset_name = "" #original"
+#                           "Extant_Leaves",
+#                           "Florissant_Fossil",
+#                           "General_Fossil"]
+
+    resolution = "original"
+    path_schema = "{family}_{genus}_{species}_{collection}_{catalog_number}"
+
+    print(f'Beginning make_all_original()')
+#     for base_dataset_name in base_dataset_names:
+    export_dataset_catalog_configuration(output_dir=output_dir,
+                                         base_dataset_name = base_dataset_name,
+                                         threshold = 0,
+                                         resolution = resolution,
+                                         version = version,
+                                         path_schema = path_schema)
+
+    print(f'FINISHED ALL IN original datasets')
+    print('=='*15)
+    
+    
+
+
 
 
 def make_fossil(args):
@@ -441,18 +479,25 @@ def cmdline_args():
     p.add_argument("--fossil", dest="make_fossil", action="store_true",
                    help="If user provides this flag, produce all configurations of the combined Florissant + General Fossil collections.")
     p.add_argument("--extant", dest="make_extant", action="store_true",
-                   help="If user provides this flag, produce all currently in-production datasets in the most recent version (currently == 'v1_0').")
+                   help="If user provides this flag, produce all currently in-production resolutions+thresholds in the dataset: Extant_Leaves's most recent version (currently == 'v1_0').")
     p.add_argument("--pnas", dest="make_pnas", action="store_true",
-                   help="If user provides this flag, produce all currently in-production datasets in the most recent version (currently == 'v1_0').")
+                   help=f"If user provides this flag, produce all currently in-production resolutions+thresholds in the dataset: PNAS's most recent version (currently == 'v1_0').")
+#                    help="If user provides this flag, produce all currently in-production datasets in the most recent version (currently == 'v1_0').")
     p.add_argument("--extant-pnas", dest="make_extant_minus_pnas", action="store_true",
-                   help="If user provides this flag, produce all currently in-production datasets in the most recent version (currently == 'v1_0').")
+                   help="If user provides this flag, produce all currently in-production resolutions+thresholds in the dataset: Extant-PNAS's most recent version (currently == 'v1_0').")
+#                    help="If user provides this flag, produce all currently in-production datasets in the most recent version (currently == 'v1_0').")
     p.add_argument("--pnas-extant", dest="make_pnas_minus_extant", action="store_true",
-                   help="If user provides this flag, produce all currently in-production datasets in the most recent version (currently == 'v1_0').")
+                   help="If user provides this flag, produce all currently in-production resolutions+thresholds in the dataset: PNAS-Extant's most recent version (currently == 'v1_0').")
+#                    help="If user provides this flag, produce all currently in-production datasets in the most recent version (currently == 'v1_0').")
     p.add_argument("--extant-w-pnas", dest="make_extant_w_pnas", action="store_true",
-                   help="If user provides this flag, produce all currently in-production datasets in the most recent version (currently == 'v1_0').")    
+                   help="If user provides this flag, produce all currently in-production resolutions+thresholds in the dataset: Extant_w_PNAS's most recent version (currently == 'v1_0').")
+#                    help="If user provides this flag, produce all currently in-production datasets in the most recent version (currently == 'v1_0').")    
+    p.add_argument("--original", dest="make_all_original", action="store_true",
+                   help=f"If user provides this flag, produce all currently in-production resolutions+thresholds in the original datasets' () most recent version (currently == 'v1_0'). Note that this excludes PNAS.")
+#                    help="If user provides this flag, produce all currently in-production datasets in the most recent version (currently == 'v1_0').")
     return p.parse_args()
     
-
+make_all_original
     
 if __name__ == "__main__":
 #     import sys
@@ -474,6 +519,8 @@ if __name__ == "__main__":
         make_pnas_minus_extant(args)
     if args.make_extant_w_pnas or args.make_all:
         make_extant_w_pnas(args)
+    if args.make_all_original or args.make_all:
+        make_all_original(args)
     
     
     

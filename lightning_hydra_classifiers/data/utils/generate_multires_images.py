@@ -13,6 +13,10 @@ python "/media/data/jacob/GitHub/lightning-hydra-classifiers/lightning_hydra_cla
 
 python "/media/data/jacob/GitHub/lightning-hydra-classifiers/lightning_hydra_classifiers/data/utils/generate_multires_images.py" --dataset_name "all" --run-all
 
+# Clean, & create, all symlink dirs for all thresholds and all datasets.
+python "/media/data/jacob/GitHub/lightning-hydra-classifiers/lightning_hydra_classifiers/data/utils/generate_multithresh_symlink_trees.py" --task "clean+create" -data "all" -a
+
+
 
 # Run 1 dataset for all 4 resolutions in serial
 
@@ -24,6 +28,12 @@ python "/media/data/jacob/GitHub/lightning-hydra-classifiers/lightning_hydra_cla
 python "/media/data/jacob/GitHub/lightning-hydra-classifiers/lightning_hydra_classifiers/data/utils/generate_multires_images.py" --resolution=1024 --dataset_name Extant_Leaves
 python "/media/data/jacob/GitHub/lightning-hydra-classifiers/lightning_hydra_classifiers/data/utils/generate_multires_images.py" --resolution=1536 --dataset_name Extant_Leaves
 python "/media/data/jacob/GitHub/lightning-hydra-classifiers/lightning_hydra_classifiers/data/utils/generate_multires_images.py" --resolution=2048 --dataset_name Extant_Leaves
+
+# Clean, & create, all symlink dirs.
+python "/media/data/jacob/GitHub/lightning-hydra-classifiers/lightning_hydra_classifiers/data/utils/generate_multithresh_symlink_trees.py" --task "clean+create" -a
+
+python "/media/data/jacob/GitHub/lightning-hydra-classifiers/lightning_hydra_classifiers/data/utils/generate_multithresh_symlink_trees.py" --task "clean+create" -data "General_Fossil"
+
 
 Note: When launching in parallel from the cmdline, be mindful of specifying low enough num_workers.
 """
@@ -264,10 +274,11 @@ def resize_and_save_img(img: Union[str, Path, PIL.Image.Image],
                         target_path: str,
                         target_shape=None
                         ):
-    if isinstance(img, (str, Path)):
-        img = Image.open(img)
     if os.path.isfile(target_path):
         return
+
+    if isinstance(img, (str, Path)):
+        img = Image.open(img)
     img = transforms.ToTensor()(img)
     target_img = clever_crop(img, target_shape=target_shape)
     target_img = (target_img * 255.0).to(torch.uint8)
@@ -294,6 +305,7 @@ def resize_and_resave_dataset_parallel(data,
     else:
         data.apply(lambda x: resize_and_save_img(img = x['path'], target_path = x['target_path'], target_shape=target_shape), axis=1)
     
+#     import pdb; pdb.set_trace()
     return data
     
     
@@ -303,12 +315,12 @@ def resize_and_resave_dataset_parallel(data,
 
 ##################
 
-def get_image_dataset(root_dir):
-    """
-    Simple wrapper around torchvision.datasets.ImageFolder
-    """
-    dataset = ImageFolder(root_dir)
-    return dataset
+# def get_image_dataset(root_dir):
+#     """
+#     Simple wrapper around torchvision.datasets.ImageFolder
+#     """
+#     dataset = ImageFolder(root_dir)
+#     return dataset
 
 
 ##################
@@ -370,7 +382,8 @@ def query_and_preprocess_catalog(config):
 
 def preprocess_target_catalog(data_df: pd.DataFrame, 
                               config,
-                              source_dir: str) -> pd.DataFrame:
+                              target_dir: str) -> pd.DataFrame:
+#                               source_dir: str) -> pd.DataFrame:
     """
     
     Arguments:
@@ -381,8 +394,8 @@ def preprocess_target_catalog(data_df: pd.DataFrame,
             ::resolution
     
     """
-#     import pdb;pdb.set_trace()
-    target_dir = source_dir.replace("original", f"{config.resolution}")
+    
+#     target_dir = source_dir.replace("original", f"{config.resolution}")
     
     target_path = None    
     if data_df.shape[0] > 0:
@@ -404,8 +417,27 @@ def preprocess_target_catalog(data_df: pd.DataFrame,
 #     return data_df
 
 
+def clean_unused_images(data_df: pd.DataFrame,
+                        path_col: str="target_path"):
+    
+    print(f"Running [CLEAN] process on target dir. Removing {data_df.shape[0]} image files that do not have a corresponding match in source dir.")
+
+#     print(data_df.columns)
+    
+    if data_df.shape[0] == 0:
+        print(f"[SKIP] Happily skipping clean_unused_images() since there were 0 extraneous images detected in target that do not exist in source")
+        return
+    
+    data_df[path_col].progress_apply(os.unlink)
+    remaining_stragglers = data_df[path_col].progress_apply(os.path.isfile).sum()
+    assert (remaining_stragglers == 0)
+    print(f"[SUCCESS] Removed {data_df.shape[0]} image files from where they dont belong!")
+
+    
+
 def warm_start_catalogs(config,
                         target_config,
+                        run_clean: bool=False,
                         save_report: bool=False) -> pd.DataFrame:
     """ Save time by skipping previously processed files and keeping only the yet-to-be processed catalog.
     
@@ -417,11 +449,30 @@ def warm_start_catalogs(config,
     source_catalog, source_dir = query_and_preprocess_catalog(config)
     target_catalog, target_dir = query_and_preprocess_catalog(target_config)
 #     import pdb; pdb.set_trace()
+
+    if target_catalog.shape[0] > 0:
+        target_paths = target_catalog.apply(lambda x: str(Path(target_dir, x.relative_path)), axis=1)
+        target_catalog = target_catalog.assign(path=target_paths)
+
     if target_catalog.shape[0] == 0:
         data_df = source_catalog
     else:
         shared, diff, source_only, target_only = diff_dataset_catalogs(source_catalog=source_catalog,
                                                                        target_catalog=target_catalog)
+        
+        if run_clean:
+            clean_unused_images(data_df = target_only, path_col="path")
+#             print(f"Running [CLEAN] process on target dir. Removing {target_only.shape[0]} image files that do not have a corresponding match in source dir.")
+            
+#             target_only.target_path.progress_apply(os.unlink)
+#             remaining_stragglers = target_only.target_path.progress_apply(os.path.isfile).sum()
+#             assert (remaining_stragglers == 0)
+#             print(f"[SUCCESS] Removed {target_only.shape[0]} image files from where they dont belong!")
+        
+        
+        
+        print(shared.shape, diff.shape, source_only.shape, target_only.shape)
+#         import pdb;pdb.set_trace()
         data_df = source_only
 
         if save_report is not None:
@@ -433,8 +484,10 @@ def warm_start_catalogs(config,
             print(f"Contents:")
             pp(os.listdir(report_dir))
 
+            
+    target_dir = source_dir.replace("original", f"{target_config.resolution}")
     
-    data_df = preprocess_target_catalog(data_df=data_df, config=target_config, source_dir=source_dir)
+    data_df = preprocess_target_catalog(data_df=data_df, config=target_config, target_dir=target_dir)
     
     return data_df
 
@@ -449,12 +502,13 @@ def setup_configs(args):
         ::resolution
     
     """
-    print('args:', vars(args))
+#     print('args:', vars(args))
     print(args.resolution)
     config = Munch(dataset_name = args.dataset_name,
                    y_col="family",
                    threshold=0,
                    resolution="original")
+    
     target_config = Munch(dataset_name = args.dataset_name,
                           resolution=args.resolution,
                           y_col="family",
@@ -468,7 +522,7 @@ def setup_configs(args):
 
 
 
-def validate_dataset(args, save_report: bool=False) -> bool:
+def validate_dataset(args) -> bool:
     """
     Compare source & target datasets, optionally save comparison report to csv files, and return True only if they are identical.
     
@@ -479,7 +533,8 @@ def validate_dataset(args, save_report: bool=False) -> bool:
     config, target_config = setup_configs(args)
     data_df = warm_start_catalogs(config,
                                   target_config,
-                                  save_report=save_report)
+                                  run_clean=args.run_clean,
+                                  save_report=args.save_report)
     return data_df.shape[0]==0
 
 
@@ -488,6 +543,7 @@ def process(args):
     config, target_config = setup_configs(args)
     data_df = warm_start_catalogs(config,
                                   target_config,
+                                  run_clean=args.run_clean,
                                   save_report=args.save_report)
     if data_df.shape[0] == 0:
         print(f'[SKIPPING PROCESS] Warm start skipping previously generated dataset: {args.dataset_name} at resolution: {args.resolution} ')
@@ -523,7 +579,7 @@ def main(args):
             
             if args.validate_only:
                 print("[RUNNING] Dataset validation only.")
-                validate_dataset(args, save_report=args.save_report)
+                validate_dataset(args) #, save_report=args.save_report)
                 i+=1
                 continue
             print("[RUNNING DATASET PROCESSING].", f": ({time.strftime('%H:%M%p %Z on %b %d, %Y')})")
@@ -532,9 +588,13 @@ def main(args):
             process(args)
             print(f"[FINISHED PROCESSING]", f": ({time.strftime('%H:%M%p %Z on %b %d, %Y')})")
             print("[RUNNING POST-PROCESSING DATA VALIDATION]")
-            validate_dataset(args, save_report=args.save_report)
+            validate_dataset(args) #, save_report=args.save_report)
             i+=1
             
+        print(f"[DATASET COMPLETE] - Finished generating dataset={dataset_name} for resolutions={resolutions}")
+        
+    print("="*20)
+    print(f"[DATASET(s) COMPLETE] - Finished generating datasets={dataset_names} for resolutions={resolutions}")
 
 
 
@@ -556,6 +616,8 @@ def cmdline_args():
                    help="Flag for when user would like to only validate datasets without launching any of the multi-res processing stages..")
     p.add_argument("--save_report", dest="save_report", action="store_true", default=False,
                    help="Flag for when user would like to save csv files from the validation report.")
+    p.add_argument("-clean", "--run_clean", dest="run_clean", action="store_true", default=False,
+                   help="Pass this flag to run the target cleaning process prior to generating any new files. Removes any images from target dirs that are not represented in the source catalog.")
     p.add_argument("--num_workers", dest="num_workers", type=int, default=15)    
     args = p.parse_args()
     

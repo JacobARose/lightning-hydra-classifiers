@@ -7,8 +7,16 @@ Created By: Jacob A Rose
 
 Summary: This script takes a source dataset of images organized into class-wise subdirs, and produces a set of symlink trees linking to it, each one containing only the classes that have at least as many images as that version's threshold.
 
-
+# print all directories and quit before launch
 python "/media/data/jacob/GitHub/lightning-hydra-classifiers/lightning_hydra_classifiers/data/utils/generate_multithresh_symlink_trees.py" --dry-run -a
+
+
+# Clean, & create, all symlink dirs.
+python "/media/data/jacob/GitHub/lightning-hydra-classifiers/lightning_hydra_classifiers/data/utils/generate_multithresh_symlink_trees.py" --task "clean+create" -a
+
+# Clean, then create, all symlink dirs.
+python "/media/data/jacob/GitHub/lightning-hydra-classifiers/lightning_hydra_classifiers/data/utils/generate_multithresh_symlink_trees.py" --task clean -a
+python "/media/data/jacob/GitHub/lightning-hydra-classifiers/lightning_hydra_classifiers/data/utils/generate_multithresh_symlink_trees.py" --task create -a
 
 """
 import argparse
@@ -282,9 +290,9 @@ def filter_rare_classes_and_create_symlinks(data: pd.DataFrame,
         
 def cmdline_args(args=""):
     p = argparse.ArgumentParser(description="Produce symlink trees from source dataset, or clean them up.")
-    p.add_argument("-t", "--task", dest="task", type=str, choices=["create", "clean"], default="create",
+    p.add_argument("-t", "--task", dest="task", type=str, choices=["create", "clean", "clean+create"], default="create",
                    help="Specify whether to create or clean (unlink) symlink trees according to the query produced by the other cmdline args.")
-    p.add_argument("-data", "--dataset_name", dest="dataset_name", type=str, nargs="+", choices=['Extant_Leaves', 'Florissant_Fossil', 'General_Fossil'],
+    p.add_argument("-data", "--dataset_name", dest="dataset_name", type=str, nargs="+", choices=['Extant_Leaves', 'Florissant_Fossil', 'General_Fossil', "all"],
                    help="Which dataset names to produce multiple threshold versions of. Currently available: ['Extant_Leaves', 'Florissant_Fossil', 'General_Fossil']")
     p.add_argument("-r", "--resolution", dest="resolution", type=int, nargs="*", default=512,
                    help="Resolution(s) to build symlinks from, images should be resized to (3, res, res).")
@@ -300,8 +308,11 @@ def cmdline_args(args=""):
                    help="Flag for displaying the configurations indicated by args, then exiting prior to actually constructing anything on disk.")    
     args = p.parse_args(args)
     
+#     if args.task == ""
     if args.run_all:
         args.resolution = [512, 1024, 1536, 2048]
+        print('[RUNNING ALL THRESHOLDS]')
+    if args.dataset_name == "all":
         args.dataset_name = ['Extant_Leaves', 'Florissant_Fossil', 'General_Fossil']
         print('[RUNNING ALL DATASETS]')
     return args
@@ -397,13 +408,14 @@ if __name__ == "__main__":
                                                dataset=data)
                 target_dir = dataset_root_dirs[cfg.dataset_name][cfg.resolution][cfg.threshold]
                 
-                if args.task == "clean":
+                if "clean" in args.task:
                     if os.path.isdir(target_dir):
                         print(f'[CLEANING] - [{time.ctime()}] - {i} - dataset: {dataset_name} - resolution: {resolution} - threshold: {threshold}')
                         print("\t\t - " + f"target_dir: {target_dir.rstrip('jpg')}")
                         shutil.rmtree(target_dir.rstrip('jpg'))
+                        print(f'[FINISHED] - [{time.ctime()}] - {i} - dataset: {dataset_name} - resolution: {resolution} - thresholds: {dataset_thresholds[dataset_name]}')
                         
-                elif args.task == "create":
+                if "create" in args.task:
                     print(f'[CREATING] - [{time.ctime()}] - {i} - dataset: {dataset_name} - resolution: {resolution} - threshold: {threshold}')
                     symlink_data_catalogs[cfg.dataset_name][cfg.resolution][cfg.threshold] = filter_rare_classes_and_create_symlinks(data=data_catalog,
                                                                                                                                      target_dir=target_dir,
@@ -413,6 +425,7 @@ if __name__ == "__main__":
                                                                                                                                      )
                 i+=1
             print(f'[FINISHED] - [{time.ctime()}] - {i} - dataset: {dataset_name} - resolution: {resolution} - thresholds: {dataset_thresholds[dataset_name]}')
+            
 
     mode='w'
     if os.path.isfile(Path(image_root_dir, "Dataset summary.txt")):

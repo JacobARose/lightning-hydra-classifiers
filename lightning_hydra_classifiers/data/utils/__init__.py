@@ -1,1 +1,2 @@
-from . import make_catalogs, catalog_registry
+# from . import catalog_registry
+# from . import make_catalogs
