@@ -67,7 +67,7 @@ from pytorch_lightning.utilities.cli import LightningCLI
 from lightning_hydra_classifiers.models import heads, base
 from lightning_hydra_classifiers.models.base import BaseLightningModule
 
-from lightning_hydra_classifiers.models.heads.classifier import Classifier
+from lightning_hydra_classifiers.models.heads.classifier import ClassifierHead
 
 
 log = logging.getLogger(__name__)
@@ -155,11 +155,11 @@ class MilestonesFinetuning(BaseFinetuning):
 
 class TransferLearningModel(BaseLightningModule):
 
-    classifier_factory: Callable = heads.Classifier
+    classifier_factory: Callable = heads.ClassifierHead
 
     def __init__(
                  self,
-                 classifier: heads.Classifier=None,
+                 classifier: heads.ClassifierHead=None,
                  train_bn: bool = False,
                  milestones: tuple = (2, 4, 8),
                  batch_size: int = 32,
@@ -172,7 +172,7 @@ class TransferLearningModel(BaseLightningModule):
                  ) -> None:
         """TransferLearningModel
         Args:
-            classifier: heads.Classifier instance (subclass of nn.Module) containing 3 named children:
+            classifier: heads.ClassifierHead instance (subclass of nn.Module) containing 3 named children:
                 1. backbone
                 2. bottleneck
                 3. head
@@ -475,7 +475,7 @@ def setup_train(data_config,
 #     backbone = backbones.build_model(model_config.name,
 #                                      pretrained=model_config.pretrained)
 
-    classifier = Classifier(backbone_name=model_config.name,
+    classifier = ClassifierHead(backbone_name=model_config.name,
                        num_classes=model_config.num_classes,
                        finetune=True)
     

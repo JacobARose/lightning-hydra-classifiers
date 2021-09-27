@@ -24,10 +24,12 @@ from torchvision.models.utils import load_state_dict_from_url
 from torchvision.models.resnet import BasicBlock, Bottleneck, model_urls
 import copy
 from typing import Union
+
 from .. import BaseModule
+from ..heads.classifier import ClassifierHead
 
 
-__all__ = ['ResNet', 'resnet18', 'resnet34', 'resnet50', 'resnet101',
+__all__ = ['ResNetBackbone', 'resnet18', 'resnet34', 'resnet50', 'resnet101',
            'resnet152', 'resnext50_32x4d', 'resnext101_32x8d',
            'wide_resnet50_2', 'wide_resnet101_2']
 
@@ -38,20 +40,20 @@ __all__ = ['ResNet', 'resnet18', 'resnet34', 'resnet50', 'resnet101',
 
 
 
-class ResNet(models.ResNet, BaseModule):
+class ResNetBackbone(models.ResNet, BaseModule):
     """
     ResNets without fully connected layer
     
     Fully Connected layer is loaded if available, but omitted from the model's forward method.
     """
     
-    layers = ['conv1', 'bn1', 'layer1', 'layer2', 'layer3', 'layer4', 'fc']
+    layers = ['conv1', 'bn1', 'layer1', 'layer2', 'layer3', 'layer4']#, 'fc']
 
     def __init__(self, *args, **kwargs):
-        super(ResNet, self).__init__(*args, **kwargs)
+        super(ResNetBackbone, self).__init__(*args, **kwargs)
         self._out_features = self.fc.in_features
-#         del self.avgpool
-#         del self.fc
+        del self.avgpool
+        del self.fc
 
     def stem(self, x):
         x = self.conv1(x)
@@ -68,14 +70,15 @@ class ResNet(models.ResNet, BaseModule):
         x = self.layer2(x)
         x = self.layer3(x)
         x = self.layer4(x)
+        return x
 
-        x = self.avgpool(x)
-        x = torch.flatten(x, 1)
-        x = x.view(-1, self.out_features)
-        return self.fc(x)
+#         x = self.avgpool(x)
+#         x = torch.flatten(x, 1)
+#         x = x.view(-1, self.out_features)
+#         return self.fc(x)
 
-    def get_classifier(self):
-        return self.fc
+#     def get_classifier(self):
+#         return self.fc
 
     @property
     def out_features(self) -> int:
@@ -88,7 +91,7 @@ class ResNet(models.ResNet, BaseModule):
 
 
 def _resnet(arch, block, layers, pretrained, progress, **kwargs):
-    model = ResNet(block, layers, **kwargs)
+    model = ResNetBackbone(block, layers, **kwargs)
     if pretrained:
         model_dict = model.state_dict()
         pretrained_dict = load_state_dict_from_url(model_urls[arch],
@@ -229,134 +232,70 @@ AVAILABLE_MODELS = ['resnet18', 'resnet34', 'resnet50', 'resnet101',
                     'resnet152', 'resnext50_32x4d', 'resnext101_32x8d',
                     'wide_resnet50_2', 'wide_resnet101_2']
 
-# def build_model(model_name: str,
-#                 pretrained: Union[str, bool]=False,
-#                 progress: bool=True,
-#                 **kwargs) -> nn.Module:
-#     assert model_name in AVAILABLE_MODELS, f'[ERROR] Please only choose from available models: {AVAILABLE_MODELS}'    
-#     model_func = globals()[model_name]
-#     if pretrained == True:
-#         pretrained = "imagenet"
-        
-#     return model_func(pretrained=pretrained, progress=progress, **kwargs)
 
 
-
+AVAILABLE_GLOBAL_POOL_LAYERS = {"avg":nn.AdaptiveAvgPool2d,
+                                "max":nn.AdaptiveMaxPool2d}
 
 
 
 class CustomResNet(BaseModule):
-    def __init__(self, model_name='resnet50', num_classes=1000, pretrained=True, progress: bool=True):
+    
+    layers = ["backbone"] # 'conv1', 'bn1', 'layer1', 'layer2', 'layer3', 'layer4', 'classifier']
+    
+    def __init__(self, 
+                 model_name='resnet50', 
+                 num_classes=1000,
+                 pretrained=True,
+                 progress: bool=True,
+                 global_pool_type: str='avg',
+                 drop_rate: float=0.0):
         super().__init__()
         
-        assert model_name in AVAILABLE_MODELS, f'[ERROR] Please only choose from available models: {AVAILABLE_MODELS}'    
-        backbone_model_func = globals()[model_name]
-        if pretrained == True:
-            pretrained = "imagenet"
-
-        self.model = backbone_model_func(pretrained=pretrained, progress=progress)#, **kwargs)
-
+        assert model_name in AVAILABLE_MODELS, f'[ERROR] Please only choose from available models: {AVAILABLE_MODELS}'
+#         assert global_pool_type in AVAILABLE_GLOBAL_POOL_LAYERS
         
-#         self.model = timm.create_model(model_name, pretrained=pretrained)
-        in_features = self.model.get_classifier().in_features
-#         in_features = self.model.in_features
-        print(f"in_features={in_features}, num_classes={num_classes}")
-        self.model.fc = nn.Linear(in_features, num_classes)
+        BackboneModelFactory = globals()[model_name]
+#         GlobalPoolFactory = AVAILABLE_GLOBAL_POOL_LAYERS[global_pool_type]
+#         if pretrained == True:
+#             pretrained = "imagenet"
+
+        self.model_name = model_name
+#         self.num_classes = num_classes
+        self.pretrained = pretrained
+            
+            
+        self.backbone = BackboneModelFactory(pretrained=self.pretrained, progress=progress)
+        self.out_features = self.backbone.out_features
+#         self.global_pool = GlobalPoolFactory(output_size=self.backbone.out_features)
+#         self.classifier = ClassifierHead(in_features=self.out_features,
+#                                          num_classes=self.num_classes)
 
     def forward(self, x):
-        x = self.model(x)
+        x = self.backbone(x)
+#         x = self.global_pool(x)
+#         x = torch.flatten(x, start_dim=1)
+#         x = self.classifier(x)
         return x
     
-    def unfreeze_at(self, layer: str):
-        assert layer in ResNet.layers
-        self.model.requires_grad = True        
-        for name, param in model.named_parameters():
-            if layer in name:
-                break
-            param.requires_grad = False
         
             
 def build_model(model_name: str,
                 pretrained: Union[str, bool]=False,
                 progress: bool=True,
                 num_classes: int=1000,
+                global_pool_type: str='avg',
+                drop_rate: float=0.0,
                 **kwargs) -> nn.Module:
     assert model_name in AVAILABLE_MODELS, f'[ERROR] Please only choose from available models: {AVAILABLE_MODELS}'    
 #     model_func = globals()[model_name]
     if pretrained == True:
         pretrained = "imagenet"
 
-    return CustomResNet(model_name=model_name, pretrained=pretrained, progress=progress, num_classes=num_classes, **kwargs)
-    
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# class ResnetClassifier(BaseModule):
-#     def __init__(self,
-#                  model_name='resnet18',
-#                  num_classes: int,                 
-#                  pretrained=False):
-#         super().__init__()
-#         self.num_classes = num_classes
-# #         self.model = timm.create_model(model_name, pretrained=pretrained)
-# #         self.in_features = self.model.get_classifier().in_features
-#         self.model = build_model(model_name, pretrained, progress)
-#         self.model.fc = nn.Linear(self.in_features, self.num_classes)
-
-#     def forward(self, x):
-#         x = self.model(x)
-#         return x
-
-
-
-
-
-
-#################################################################################
-#################################################################################
-#################################################################################
-#################################################################################
-
-# class CustomResNet(nn.Module):
-#     def __init__(self, model_name='resnet18', pretrained=True):
-#         super().__init__()
-#         self.model = timm.create_model(model_name, pretrained=pretrained)
-#         in_features = self.model.get_classifier().in_features
-#         self.model.fc = nn.Linear(in_features, CFG.num_classes)
-
-#     def forward(self, x):
-#         x = self.model(x)
-#         return x
-    
-#     def unfreeze_at(self, layer: str):
-#         assert layer in resnet_layers
-#         self.model.requires_grad = True        
-#         for name, param in model.named_parameters():
-#             if layer in name:
-#                 break
-#             param.requires_grad = False
+    return CustomResNet(model_name=model_name,
+                        pretrained=pretrained,
+                        progress=progress, 
+                        num_classes=num_classes,
+                        global_pool_type=global_pool_type,
+                        drop_rate=drop_rate,
+                        **kwargs)

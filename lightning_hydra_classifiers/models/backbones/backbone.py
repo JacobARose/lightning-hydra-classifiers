@@ -33,49 +33,61 @@ AVAILABLE_MODELS = {"resnet":resnet.AVAILABLE_MODELS,
 
 
 
-
-
 def build_model(model_name: str,
                 pretrained: bool=False,
                 progress: bool=True,
                 num_classes: int=1000,
+                global_pool_type: str='avg',
+                drop_rate: float=0.0,
                 **kwargs) -> nn.Module:
 
 #     if 'resnet' in model_name:
-    if model_name in resnet.AVAILABLE_MODELS:
-        model = resnet.build_model(model_name=model_name,
-                                  pretrained=pretrained,
-                                  progress=progress,
-                                  num_classes=num_classes,
-                                  **kwargs)
+#     if model_name in resnet.AVAILABLE_MODELS:
+#         model = resnet.build_model(model_name=model_name,
+#                                   pretrained=pretrained,
+#                                   progress=progress,
+#                                   num_classes=num_classes,
+#                                   **kwargs)
 
+# #     elif 'senet' in model_name:
+#     elif model_name in senet.AVAILABLE_MODELS:
+#         model = senet.build_model(model_name=model_name,
+#                                   pretrained=pretrained,
+#                                   progress=progress,
+#                                   num_classes=num_classes,
+#                                   **kwargs)
+
+# #     elif 'efficientnet' in model_name:
+#     elif model_name in efficientnet.AVAILABLE_MODELS:
+#         model = efficientnet.build_model(model_name=model_name,
+#                                          pretrained=pretrained,
+#                                          progress=progress,
+#                                          num_classes=num_classes,
+#                                          **kwargs)
+    if model_name in resnet.AVAILABLE_MODELS:
+        ModelFactory = resnet.build_model
+        
 #     elif 'senet' in model_name:
     elif model_name in senet.AVAILABLE_MODELS:
-        model = senet.build_model(model_name=model_name,
-                                  pretrained=pretrained,
-                                  progress=progress,
-                                  num_classes=num_classes,
-                                  **kwargs)
+        ModelFactory = senet.build_model
 
 #     elif 'efficientnet' in model_name:
     elif model_name in efficientnet.AVAILABLE_MODELS:
-        model = efficientnet.build_model(model_name=model_name,
-                                         pretrained=pretrained,
-                                         progress=progress,
-                                         num_classes=num_classes,
-                                         **kwargs)
-    
+        ModelFactory = efficientnet.build_model
     else:
         print(f"model with name {model_name} has not be implemented yet.")
         print("Available Models:")
         pp(AVAILABLE_MODELS)
         return None
     
-    model = model.model
-    
-    model.name = model_name
-    model.pretrained = pretrained
-    
+    model = ModelFactory(model_name=model_name,
+                         pretrained=pretrained,
+                         progress=progress,
+                         num_classes=num_classes,
+                         global_pool_type=global_pool_type,
+                         drop_rate=drop_rate,
+                         **kwargs)
+
     print(f"[BUILDING MODEL] build_model({model_name}, pretrained={pretrained})")
     
     return model

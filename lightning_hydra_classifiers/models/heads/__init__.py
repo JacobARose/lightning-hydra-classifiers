@@ -8,4 +8,4 @@ Heads = Registry()
 from . import classifier
 from . import domain_discriminator
 
-from .classifier import Classifier
+from .classifier import ClassifierHead

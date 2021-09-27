@@ -91,7 +91,6 @@ class BaseModule(nn.Module):
         for m in modules:
             if isinstance(m, nn.Conv2d):
                 nn.init.kaiming_uniform_(m.weight)
-
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0)
 
