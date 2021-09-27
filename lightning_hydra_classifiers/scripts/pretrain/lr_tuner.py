@@ -127,6 +127,8 @@ def run_lr_tuner(trainer: pl.Trainer,
         model.config.lr = suggestion['lr']
         model.hparams.lr = model.config.lr
         config.model.lr = model.config.lr
+        config.model.optimizer.lr = model.config.lr
+        model.hparams.config.update(config.model)
         best_hparams = OmegaConf.create({"optimized_hparam_key": "lr",
                                          "lr":best_lr,
                                          "batch_size":config.data.batch_size,

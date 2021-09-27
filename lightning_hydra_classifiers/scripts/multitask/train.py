@@ -16,7 +16,7 @@
 
 Run default experiment:
 
->> python "/media/data/jacob/GitHub/lightning-hydra-classifiers/lightning_hydra_classifiers/scripts/train_multitask.py"
+>> python "/media/data/jacob/GitHub/lightning-hydra-classifiers/lightning_hydra_classifiers/scripts/multitask/train.py"
 
 
 >> python "/media/data/jacob/GitHub/lightning-hydra-classifiers/lightning_hydra_classifiers/scripts/multitask/train.py" --list_available_backbones
@@ -49,7 +49,7 @@ import torchvision
 from torchvision import transforms
 import pytorch_lightning as pl
 import timm
-torch.backends.cudnn.benchmark = True
+# torch.backends.cudnn.benchmark = True
 
 
 from rich import print as pp
@@ -57,6 +57,7 @@ import matplotlib.pyplot as plt
 from munch import Munch
 import argparse
 import json
+from omegaconf import OmegaConf
 from typing import Tuple, Union, List
 # from lightning_hydra_classifiers.data.utils.make_catalogs import *
 from lightning_hydra_classifiers.utils.dataset_management_utils import Extract
@@ -72,15 +73,22 @@ from lightning_hydra_classifiers.experiments.transfer_experiment import Transfer
 # from lightning_hydra_classifiers.utils.common_utils import LabelEncoder
 
 from lightning_hydra_classifiers.experiments.multitask.datamodules import MultiTaskDataModule
-from lightning_hydra_classifiers.experiments.multitask.modules import LitMultiTaskModule
+from lightning_hydra_classifiers.experiments.multitask.modules import LitMultiTaskModule#, AdamWOptimizerConfig
 from lightning_hydra_classifiers.experiments.reference_transfer_experiment import CIFAR10DataModule
 from lightning_hydra_classifiers.utils.callback_utils import ImagePredictionLogger
 from lightning_hydra_classifiers.utils.template_utils import get_logger
 
-
+from lightning_hydra_classifiers.experiments.configs.config import MultiTaskExperimentConfig
+from lightning_hydra_classifiers.experiments.configs.model import *
+from lightning_hydra_classifiers.experiments.configs.trainer import *
+from dataclasses import dataclass
 from lightning_hydra_classifiers.scripts.pretrain import lr_tuner
+from lightning_hydra_classifiers.utils.dataset_management_utils import ETL
 # from pl_bolts.callbacks import TrainingDataMonitor
 import pl_bolts
+
+import hydra
+from hydra.core.config_store import ConfigStore
 ############################################
 logger = get_logger(name=__name__)
 ########################################################
@@ -89,27 +97,35 @@ logger = get_logger(name=__name__)
 
 
 
-def load_data_and_model(config: argparse.Namespace, task_id: int=0) -> Tuple["DataModule", LitMultiTaskModule]:
 
+def load_data(config: argparse.Namespace,
+              task_id: int=0
+             ) -> "DataModule":
 
     if config.debug == True:
         logger.warning(f"Debug mode activated, loading CIFAR10 datamodule")
-        datamodule = CIFAR10DataModule(batch_size=config.data.batch_size,
-                                       task_id=task_id,
+        datamodule = CIFAR10DataModule(task_id=task_id,
+                                       batch_size=config.data.batch_size,
                                        image_size=config.data.image_size,
                                        image_buffer_size=config.data.image_buffer_size,
                                        num_workers=config.data.num_workers,
                                        pin_memory=config.data.pin_memory)
     else:
-        datamodule = MultiTaskDataModule(batch_size=config.data.batch_size,
-                                     task_id=task_id,
-                                     image_size=config.data.image_size,
-                                     image_buffer_size=config.data.image_buffer_size,
-                                     num_workers=config.data.num_workers,
-                                     pin_memory=config.data.pin_memory)
-    datamodule.setup()#"fit")
+        datamodule = MultiTaskDataModule(task_id=task_id,
+                                         batch_size=config.data.batch_size,
+                                         image_size=config.data.image_size,
+                                         image_buffer_size=config.data.image_buffer_size,
+                                         num_workers=config.data.num_workers,
+                                         pin_memory=config.data.pin_memory)
+    datamodule.setup()
+    return datamodule
+
+
+def load_data_and_model(config: argparse.Namespace, task_id: int=0) -> Tuple["DataModule", LitMultiTaskModule]:
+
+    datamodule = load_data(config=config,
+                           task_id=task_id)
     config.model.num_classes = datamodule.num_classes
-    pp(config)
     
     if os.path.isfile(str(config.model.ckpt_path)):
         logger.info(f"Loading from model checkpoint: {str(config.model.ckpt_path)}")
@@ -117,7 +133,7 @@ def load_data_and_model(config: argparse.Namespace, task_id: int=0) -> Tuple["Da
     else:
         if isinstance(config.model.ckpt_path, (str, Path)):
             logger.warning(f"User specified checkpoint path doesn't exist. Best checkpoint produced during training will be copied to that location: {config.model.ckpt_path}")
-        logger.info(f"Instantiating model from scratch with hparams:")
+        logger.info(f"Instantiating model with hparams:")
         logger.info(config.model)
         model = LitMultiTaskModule(config.model)
     model.label_encoder = datamodule.label_encoder
@@ -151,6 +167,10 @@ def train_task(config: argparse.Namespace, task_id: int=0):
     earlystopping = pl.callbacks.EarlyStopping(monitor=config.callbacks.monitor.metric,
                                                patience=3,
                                                mode=config.callbacks.monitor.mode)
+    callbacks=[earlystopping,
+               checkpoint_callback,
+               img_prediction_callback]#,
+#                data_monitor_callback]
     wandb_logger = pl.loggers.WandbLogger(entity = "jrose",
                                           project = "image_classification_train",
                                           job_type = "train_supervised",
@@ -160,21 +180,10 @@ def train_task(config: argparse.Namespace, task_id: int=0):
                                           dir=config.experiment_dir)
 
     trainer = pl.Trainer(**dict(config.trainer),
-#                 limit_train_batches=0.1,
-#                 limit_val_batches=0.1,
-#                 resume_from_checkpoint=config.trainer.resume_from_checkpoint,
-#                 max_epochs=config.trainer.num_epochs,
-#                 gpus=config.trainer.gpus,
-#                 auto_lr_find=bool(config.model.lr is not None),
-#                 precision=config.trainer.precision,
-                callbacks=[earlystopping,
-                           checkpoint_callback,
-                           img_prediction_callback,
-                           data_monitor_callback],
-#                 overfit_batches=5,
-                logger=wandb_logger,
+                         callbacks=callbacks)#,
+#                          logger=wandb_logger)#,
 #                 track_grad_norm=2,
-                weights_summary='top')
+#                 weights_summary='top')
 
     if config.debug == True:
         import pdb; pdb.set_trace()
@@ -186,6 +195,9 @@ def train_task(config: argparse.Namespace, task_id: int=0):
 #                     config=dict(config),
 #                     group=f'{config.model.model_name}_task_{task_id}',
 #                     reinit=True) as run:
+    print('config.stages[f"task_{task_id}"]: ', config.stages[f"task_{task_id}"])
+    skip_lr_tuner = config.stages[f"task_{task_id}"].skip_lr_tuner
+    if not skip_lr_tuner:
 
         logger.info(f"[Initiating Stage] lr_tuner")
         suggestion, lr_tuner_results, config = lr_tuner.run_lr_tuner(trainer=trainer,
@@ -194,32 +206,45 @@ def train_task(config: argparse.Namespace, task_id: int=0):
                                                                      config=config,
                                                                      results_dir = config.stages[f"task_{task_id}"].lr_tuner_dir,
                                                                      group=f'{config.model.model_name}_task_{task_id}')
-#                                                                      run=run)
-        
+    #                                                                      run=run)
+        print(f"model.lr={model.lr}")
+        model.lr = suggestion['lr']
+        print(f"model.lr={model.lr}")
+        print(f"model.config.lr={model.config.lr}")
         model.config.lr = suggestion['lr']
-
-        wandb.watch(model, log='all')
-
-    try:
-        trainer.fit(model, datamodule)
-    except KeyboardInterrupt as e:
-        logger.warning("Interruption:", e)
-    finally:
-        logger.info(f"checkpoint_callback.best_model_path: {checkpoint_callback.best_model_path}")
-        config.stages[f"task_{task_id}"].ckpt_path = checkpoint_callback.best_model_path
-        logger.info(f"checkpoint_callback.best_model_score: {checkpoint_callback.best_model_score:.3f}")
-    logger.info(f"[Initiating TESTING on task_{task_id}]")
-
-#     test_results = trainer.test(datamodule=datamodule)
-
-    test_results = run_multitask_test(trainer=trainer,
-                                      model=model,
-                                      datamodule=datamodule,
-                                      config=config,
-                                      tasks="all")#,
-#                                       results_path=results_path)
-
+        model.config.optimizer.lr = suggestion['lr']
     
+    print(f"model.config.lr={model.config.lr}")
+    with wandb.init(job_type = "supervised_train",
+                    config=dict(config),
+                    group=f'{config.model.model_name}_task_{task_id}',
+                    reinit=True) as run:
+
+    #         wandb.watch(model, log='all')
+        trainer.logger = wandb_logger
+        wandb.watch(model.backbone, log='all')
+        wandb.watch(model.classifier, log='all')
+
+        try:
+            trainer.fit(model, datamodule)
+        except KeyboardInterrupt as e:
+            logger.warning("Interruption:", e)
+        finally:
+            logger.info(f"checkpoint_callback.best_model_path: {str(checkpoint_callback.best_model_path)}")
+            config.stages[f"task_{task_id}"].ckpt_path = checkpoint_callback.best_model_path
+            checkpoint_callback.best_model_score = checkpoint_callback.best_model_score or 0.0
+            logger.info(f"checkpoint_callback.best_model_score: {checkpoint_callback.best_model_score:.3f}")
+        logger.info(f"[Initiating TESTING on task_{task_id}]")
+
+
+        test_results = run_multitask_test(trainer=trainer,
+                                          model=model,
+                                          datamodule=datamodule,
+                                          config=config,
+                                          tasks="all")#,
+    #                                       results_path=results_path)
+
+
     logger.info(f"[FINISHED] TESTING on task_{task_id}")
     logger.info(f"Results: {test_results}")
     return test_results, config
@@ -253,34 +278,6 @@ def run_multitask_test(trainer: pl.Trainer,
         
     return test_results
     
-
-
-# def run_multitask_test(trainer: pl.Trainer,
-#                        model: pl.LightningModule,
-#                        datamodule: pl.LightningDataModule,
-#                        config: argparse.Namespace=None,
-#                        tasks: Union[str, List[int]]="all",
-#                        results_path: str=None,
-#                        run=None):
-#     if tasks == "all":
-#         tasks = list(range(len(datamodule.tasks)))
-    
-#     test_results = {}
-#     for task_id in tasks:
-# #         datamodule.set_task(task_id)
-#         tag=config.stages[f"task_{task_id}"].name
-# #         model.init_metrics(stage='test', tag=tag)
-#         trainer.logger = pl.loggers.CSVLogger("logs", name=tag)
-#         datamodule.setup()
-#         logger.info(f"[TESTING] {tag}")
-#         test_results[task_id] = trainer.test(model, datamodule=datamodule)
-        
-#     return test_results
-    
-
-
-
-
 
 # from lightning_hydra_classifiers.experiments.transfer_experiment import TransferExperiment
 # output_root_dir = "/media/data_cifs/projects/prj_fossils/users/jacob/experiments/July2021-Nov2021/csv_datasets/experimental_datasets"
@@ -329,6 +326,10 @@ def cmdline_args(arg_overrides=None):
                    help="Use pretrained imagenet weights or randomly initialize from scratch.")
     p.add_argument("-lr", "--learning_rate", dest="learning_rate", type=float, default=3e-8,
                    help="Optional Initial learning rate. Ignored for now, in the future will force skip any lr_tuner stage.")
+    p.add_argument("-l2", "--weight_decay", dest="weight_decay", type=float, default=0.0,
+                   help="Weight decay.")
+    p.add_argument("-pool", "--global_pool_type", dest="global_pool_type", default="avg", choices=["avg", "max"],
+                   help="Specify either an AdaptiveAveragePool or AdaptiveMaxPool for connecting the model base to its classifier head.")    
     p.add_argument("--gpus", dest="gpus", type=int, default=1, nargs="*",
                    help="Specify number of gpus or specific gpu ids.")
     p.add_argument("-d", "--debug", dest="debug", action="store_true", default=False,
@@ -343,22 +344,23 @@ def cmdline_args(arg_overrides=None):
     logger.info("Args:")
     pp(args)
     
-    config = Munch({
+    config = OmegaConf.create({
         "seed":42,
 #         "num_epochs": args.num_epochs,
 #         "precision": 16,
-        "device": torch.device('cuda' if torch.cuda.is_available() else 'cpu'),
+#         "device": torch.device('cuda' if torch.cuda.is_available() else 'cpu'),
+        "device": 'cuda' if torch.cuda.is_available() else 'cpu',
         "output_dir":args.output_dir,
         "debug":args.debug
     })
 
-    config.trainer = Munch({"precision": 16,
-                            "max_epochs": args.num_epochs,
-                            "gpus": args.gpus,
-                            "resume_from_checkpoint": args.resume_from_checkpoint
-                            })
+    config.trainer = OmegaConf.create({"precision": 16,
+                                       "max_epochs": args.num_epochs,
+                                       "gpus": args.gpus,
+                                       "resume_from_checkpoint": args.resume_from_checkpoint
+                                      })
     
-    config.data = Munch({
+    config.data = OmegaConf.create({
         "image_size": args.image_size,
         "image_buffer_size": args.image_buffer_size,
         "batch_size": args.batch_size,
@@ -366,24 +368,31 @@ def cmdline_args(arg_overrides=None):
         "pin_memory": True
     })
     
-    config.model = Munch({"model_name": args.model_name,
-                          "init_freeze_up_to":args.init_freeze_up_to,
-                          "pretrained": args.pretrained,
-                          "lr": args.learning_rate,
-                          "num_classes": None,
-                          "image_size": args.image_size,
-                          "ckpt_path": args.load_from_checkpoint,
-                          "t_max": 20,
-                          "min_lr": 1e-6})
+    config.model = OmegaConf.create({"model_name": args.model_name,
+                                     "init_freeze_up_to":args.init_freeze_up_to,
+                                     "pretrained": args.pretrained,
+                                     "lr": args.learning_rate,
+                                     "weight_decay":args.weight_decay,
+                                     "num_classes": None,
+                                     "global_pool_type": args.global_pool_type,
+                                     "drop_rate": 0.0,
+                                     "image_size": args.image_size,
+                                     "ckpt_path": args.load_from_checkpoint,
+                                     "min_lr": 1e-6})
+    from lightning_hydra_classifiers.experiments.configs.optimizer import AdamWOptimizerConfig
 
-    config.callbacks = Munch({"monitor":
-                              Munch({"metric":"val_acc",
+    config.model.optimizer = OmegaConf.structured(AdamWOptimizerConfig(lr=args.learning_rate,
+                                                                      weight_decay=args.weight_decay))
+    
+
+    config.callbacks = OmegaConf.create({"monitor":
+                              OmegaConf.create({"metric":"val_acc",
                                      "mode": "max"})
-#                               Munch({"metric":"val_loss",
+#                               OmegaConf.create({"metric":"val_loss",
 #                                      "mode": "min"})
                              })
 
-    config.stages = Munch({#"lr_tuner":True,
+    config.stages = OmegaConf.create({#"lr_tuner":True,
                            "task_0":None,
                            "task_1":None})
     
@@ -394,20 +403,23 @@ def cmdline_args(arg_overrides=None):
         sys.exit()
     
     if config.debug:
-        config.stages.task_0 = Munch({"name":"CIFAR10",
-                                      "task_id":0})
+        config.stages.task_0 = OmegaConf.create({"name":"CIFAR10",
+                                      "task_id":0,
+                                      "skip_lr_tuner":False})
         del config.stages.task_1
-        config.trainer.update(Munch(max_epochs=2,
+        config.trainer.update(OmegaConf.create(max_epochs=2,
                                     limit_train_batches=4,
                                     limit_val_batches=4,
                                     limit_test_batches=4,
                                     auto_lr_find=bool(config.model.lr is not None)))
         
     else:
-        config.stages.task_0 = Munch({"name":"Extant-PNAS",
-                                      "task_id":0})
-        config.stages.task_1 = Munch({"name":"PNAS",
-                                      "task_id":1})
+        config.stages.task_0 = OmegaConf.create({"name":"Extant-PNAS",
+                                      "task_id":0,
+                                      "skip_lr_tuner":False})
+        config.stages.task_1 = OmegaConf.create({"name":"PNAS",
+                                      "task_id":1,
+                                      "skip_lr_tuner":False})
 
     if "task_1" in config.stages:
         task_tags = config.stages.task_0.name + "-to-" + config.stages.task_1.name
@@ -442,46 +454,87 @@ def cmdline_args(arg_overrides=None):
     return args, config
 
 
-
-
-
-
-
-
-if __name__ == '__main__':
     
-    args, config = cmdline_args()
-    os.makedirs(config.experiment_dir, exist_ok=True)
+# def main():
+    
+#     args, config = cmdline_args()
+#     os.makedirs(config.experiment_dir, exist_ok=True)
 
-    os.environ["WANDB_ENTITY"] = "jrose"
-    os.environ["WANDB_PROJECT"] = "image_classification_train"
-    os.environ["WANDB_DIR"] = config.experiment_dir
+#     os.environ["WANDB_ENTITY"] = "jrose"
+#     os.environ["WANDB_PROJECT"] = "image_classification_train"
+#     os.environ["WANDB_DIR"] = config.experiment_dir
+        
+# #     torch.backends.cudnn.benchmark = True
+# #     torch.backends.cudnn.enabled = True
     
-#     os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-    results = {}
+#     results = {}
     
-    results["task_0"], config = train_task(config=config, task_id=0)
-    config.model.ckpt_path = config.stages["task_0"].ckpt_path
+#     results["task_0"], config = train_task(config=config, task_id=0)
+#     config.model.ckpt_path = config.stages["task_0"].ckpt_path
     
     
-    if "task_1" in config.stages:
-        print(f"[Initiating] Transfer to Task_1: {config.stages.task_1.name}")
-        print(f"[Re-loading model from checkpoint path] : {config.model.ckpt_path}")
-        #TODO Log/Cache experiment artifacts here.    
-        results["task_1"], config = train_task(config=config, task_id=1)
+#     if "task_1" in config.stages:
+#         print(f"[Initiating] Transfer to Task_1: {config.stages.task_1.name}")
+#         print(f"[Re-loading model from checkpoint path] : {config.model.ckpt_path}")
+#         #TODO Log/Cache experiment artifacts here.    
+#         results["task_1"], config = train_task(config=config, task_id=1)
         
     
-    print(f"[SUCCESSFULLY FINISHED TRAIN.PY]")
-    torch.save(results, str(Path(config.experiment_dir, "test_results.pth")))
-    logger.info(json.dumps(results))
-    if os.path.isfile(str(Path(config.experiment_dir, "test_results.pth"))):
-        logger.info(f'Congratulations, your test results are pickled using torch.save to: {str(Path(config.experiment_dir, "test_results.pth"))}')
-    else:
-        logger.warning(f'[Warning] Saving test results to {str(Path(config.experiment_dir, "test_results.pth"))} failed')
+#     print(f"[SUCCESSFULLY FINISHED TRAIN.PY]")
+#     torch.save(results, str(Path(config.experiment_dir, "test_results.pth")))
+#     logger.info(json.dumps(results))
+#     if os.path.isfile(str(Path(config.experiment_dir, "test_results.pth"))):
+#         logger.info(f'Congratulations, your test results are pickled using torch.save to: {str(Path(config.experiment_dir, "test_results.pth"))}')
+#     else:
+#         logger.warning(f'[Warning] Saving test results to {str(Path(config.experiment_dir, "test_results.pth"))} failed')
+
+
+# import hydra
+# from hydra.core.config_store import ConfigStore
 
 
 
+# @dataclass
+# class MultiTaskExperimentConfig:
+#     resolution: int = 512
+#     channels: int = 3
+#     root_dir: str = "."
+#     seed: int = 1234
 
+#     model: LitMultiTaskModuleConfig = LitMultiTaskModuleConfig()
+#     trainer: TrainerConfig = TrainerConfig()
+        
+
+cs = ConfigStore.instance()
+cs.store(name="config", node=MultiTaskExperimentConfig)
+
+import hydra
+
+@hydra.main(config_name="config") #"multitask_experiment_config")
+def main(cfg):
+    # NOTE: this is needed so that data is only downloaded once
+    cfg.root_dir = hydra.utils.get_original_cwd()
+    pp(f"BEFORE")
+    print(OmegaConf.to_yaml(cfg))
+    pl.seed_everything(cfg.seed)
+
+    
+    cfg = ETL.init_structured_config(cfg=cfg,
+                                     dataclass_type = MultiTaskExperimentConfig)
+        
+    pp(cfg)
+        
+        
+        
+        
+        
+        
+        
+        
+        
+if __name__ == '__main__':
+    
+    main()
 
 
 
@@ -740,7 +793,7 @@ if __name__ == '__main__':
     
 #     def __init__(self, config): #, ckpt_path: Optional[str]=None):
 #         super().__init__()
-#         config = Munch(config)
+#         config = OmegaConf.create(config)
 #         self.config = config
 #         self.lr = config.lr
 #         self.num_classes = config.num_classes
@@ -751,8 +804,8 @@ if __name__ == '__main__':
 #         self.criterion = nn.CrossEntropyLoss()        
 
 #     def update_config(self, config):
-#         self.config.update(Munch(config))
-#         self.hparams.config.update(Munch(config))
+#         self.config.update(OmegaConf.create(config))
+#         self.hparams.config.update(OmegaConf.create(config))
         
 #     def forward(self, x, *args, **kwargs):
 #         return self.model(x)
