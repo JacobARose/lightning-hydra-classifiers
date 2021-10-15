@@ -17,7 +17,7 @@ import torch
 from typing import *
 
 from pytorch_lightning.utilities.distributed import rank_zero_only
-from lightning_hydra_classifiers.experiments.transfer_experiment import TransferExperiment
+from lightning_hydra_classifiers.experiments.transfer_experiment import TransferExperiment, TransferExperimentConfig, Extant_to_PNAS_ExperimentConfig, Extant_to_Fossil_ExperimentConfig
 from lightning_hydra_classifiers.utils.template_utils import get_logger
 ############################################
 logger = get_logger(name=__name__)
@@ -36,7 +36,8 @@ class MultiTaskDataModule(pl.LightningDataModule):
                  image_size: int=224,
                  image_buffer_size: int=32,
                  num_workers: int=4,
-                 pin_memory: bool=True):
+                 pin_memory: bool=True,
+                 experiment_config: Optional[TransferExperimentConfig]=None):
         super().__init__()
         self.batch_size = batch_size
         self.num_workers = num_workers
@@ -49,9 +50,10 @@ class MultiTaskDataModule(pl.LightningDataModule):
         self.mean = [0.485, 0.456, 0.406]
         self.std = [0.229, 0.224, 0.225]
         
+        
         # TBD Make Base and SingleTask versions of experiment.
-        self.experiment = TransferExperiment()
-
+        self.experiment = TransferExperiment(experiment_config)
+        self.experiment_config = self.experiment.config
         
         # Train augmentation policy
         self.__init_transforms()
@@ -119,6 +121,7 @@ class MultiTaskDataModule(pl.LightningDataModule):
             self.classes = self.train_dataset.classes
             self.num_classes = len(self.train_dataset.label_encoder)
             self.label_encoder = self.train_dataset.label_encoder
+            
             self.full_name = self.train_dataset.config.full_name
             if hasattr(self.train_dataset.config, "task_tag"):
                 self.task_tag = self.train_dataset.config.task_tag
@@ -132,6 +135,11 @@ class MultiTaskDataModule(pl.LightningDataModule):
         self._has_setup_test = False
 #         else:
 #             logger.warning(f"[No-Op] Task_{self.task_id}: datamodule.setup(stage={stage})")
+    def get_dataset(self, stage: str="train"):
+        if stage=="fit": stage="train"
+        assert hasattr(self, f"{stage}_dataset")
+        return getattr(self, f"{stage}_dataset")
+
     def train_dataloader(self):
         return torch.utils.data.DataLoader(self.train_dataset,
                           batch_size=self.batch_size,
@@ -144,13 +152,15 @@ class MultiTaskDataModule(pl.LightningDataModule):
         return torch.utils.data.DataLoader(self.val_dataset,
                           batch_size=self.batch_size,
                           pin_memory=self.pin_memory,
-                          num_workers=self.num_workers)
+                          num_workers=self.num_workers,
+                          drop_last=False)
     
     def test_dataloader(self):
         return torch.utils.data.DataLoader(self.test_dataset,
                           batch_size=self.batch_size,
                           pin_memory=self.pin_memory,
-                          num_workers=self.num_workers)
+                          num_workers=self.num_workers,
+                          drop_last=False)
 
 
 

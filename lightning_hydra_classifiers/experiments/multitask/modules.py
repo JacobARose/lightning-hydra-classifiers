@@ -25,7 +25,7 @@ from typing import Union, Optional, List, Tuple
 from lightning_hydra_classifiers.models.heads import ClassifierHead
 from lightning_hydra_classifiers.models.backbones import backbone
 from lightning_hydra_classifiers.utils.metric_utils import get_per_class_metrics, get_scalar_metrics
-
+from lightning_hydra_classifiers.models.base import BaseModule
 from lightning_hydra_classifiers.experiments.configs.model import *
 # from lightning_hydra_classifiers.experiments.configs.trainer import *
 
@@ -35,7 +35,7 @@ __all__ = ["LitMultiTaskModule"]#, "AdamWOptimizerConfig", "AdamOptimizerConfig"
 
 
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields, asdict
 
 
 # @dataclass
@@ -93,7 +93,7 @@ AVAILABLE_GLOBAL_POOL_LAYERS = {"avg":nn.AdaptiveAvgPool2d,
 # class LitMultiTaskModuleConfig:
     
 #     backbone_config: BackboneConfig = BackboneConfig(backbone_name="resnet50")
-#     multitask_config: MultiTaskClassifierConfig = MultiTaskClassifierConfig()
+#     multitask: MultiTaskClassifierConfig = MultiTaskClassifierConfig()
     
     
 #     model_name: str
@@ -122,31 +122,40 @@ AVAILABLE_GLOBAL_POOL_LAYERS = {"avg":nn.AdaptiveAvgPool2d,
 
 
 
-class LitMultiTaskModule(pl.LightningModule):
+class LitMultiTaskModule(pl.LightningModule, BaseModule):
     
     layers = ["backbone", "global_pool", "classifier"]
     
     def __init__(self, config: LitMultiTaskModuleConfig):
         super().__init__()
+        self.current_task = "task_0"
         self.config = config
+        try:
+            config = asdict(config)
+        except:
+            config = dict(config)
+#         import pdb; pdb.set_trace()
         self.save_hyperparameters({
-                                   "config":asdict(self.config)
+                                   "config":config
         })
         self.heads = {}
-        self.init_backbone(config=self.config.backbone_config)
-        self.config.multitask_config.task_0.out_features = self.out_features
-        self.config.multitask_config.task_1.out_features = self.out_features
+        self.init_backbone(config=self.config.backbone)
+        self.config.multitask.task_0.in_features = self.out_features
+#         self.config.multitask.task_0.num_classes = config.num_classes
+        self.config.multitask.task_1.in_features = self.out_features
+#         self.config.multitask.task_1.num_classes = config.num_classes
         
         self.init_classifier(key="task_0",
-                             config=self.config.multitask_config.task_0)
+                             config=self.config.multitask.task_0)
         self.init_classifier(key="task_1",
-                             config=self.config.multitask_config.task_1)
+                             config=self.config.multitask.task_1)
         self.set_current_classifier(key="task_0")        
         
         self.metrics = self.init_metrics(stage='all')
         self.criterion = nn.CrossEntropyLoss()
         
     def features(self, x):
+#         import pdb;pdb.set_trace()
         x = self.backbone(x)
         x = self.global_pool(x)
         return x
@@ -160,13 +169,15 @@ class LitMultiTaskModule(pl.LightningModule):
     def init_classifier(self,
                         key: str,
                         config: ClassifierConfig):
-        self.heads[key] = ClassifierHead(in_features=config.out_features,
+        self.heads[key] = ClassifierHead(in_features=config.in_features,
                                          num_classes=config.num_classes)        
         
     def set_current_classifier(self,
                                key: str):
-        assert key in heads
+        assert key in self.heads
         self.classifier = self.heads[key]
+        self.num_classes = self.classifier.num_classes
+        self.current_task = key
     
     def init_backbone(self,
                       config: BackboneConfig,
@@ -174,14 +185,22 @@ class LitMultiTaskModule(pl.LightningModule):
         
 
         GlobalPoolFactory = AVAILABLE_GLOBAL_POOL_LAYERS[config.global_pool_type]
-        self.backbone = backbone.build_model(model_name=config.backbone_name,
-                                             pretrained=config.pretrained,
-#                                              num_classes=num_classes,
-#                                              global_pool_type=config.global_pool_type,
-                                             drop_rate=config.drop_rate)
+#         self.backbone = backbone.build_model(model_name=config.backbone_name,
+#                                              pretrained=config.pretrained,
+# #                                              num_classes=num_classes,
+# #                                              global_pool_type=config.global_pool_type,
+#                                              drop_rate=config.drop_rate)
 
-        self.out_features = self.backbone.out_features
-        self.global_pool = self.backbone.global_pool
+
+        backbone_module = backbone.build_model(model_name=config.backbone_name,
+                                                 pretrained=config.pretrained,
+                                                 drop_rate=config.drop_rate)
+                         
+        self.backbone = nn.Sequential(OrderedDict(backbone_module.backbone.named_children()))
+
+        self.out_features = backbone_module.out_features
+
+        self.global_pool = GlobalPoolFactory(1) #self.out_features//4) #self.backbone.global_pool
         
         
 #         self.classifier = self.backbone.classifier
@@ -203,15 +222,19 @@ class LitMultiTaskModule(pl.LightningModule):
         config = OmegaConf.structured(config)
 #         config = OmegaConf.create(dict(config))
         self._config = config
-        self.tasks = list(config.multitask_config.__dataclass_fields__.keys())
+        print(type(config.multitask))
+        self.tasks = list(dict(config.multitask).keys())
+#         self.tasks = list(config.multitask.__dataclass_fields__.keys())
 #         self.hparams.config.update(config)
-        self.lr = config.lr
-        self.weight_decay = config.weight_decay
-        self.num_classes = config.num_classes
+        self.lr = config.optimizer.lr
+        self.weight_decay = config.optimizer.weight_decay
+        self.num_classes = config.multitask[self.current_task].num_classes
     
     def configure_optimizers(self):
         print(f"self.hparams={self.hparams}")
-        self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.lr, weight_decay=self.weight_decay)#hparams.lr)
+        self.optimizer = torch.optim.AdamW([{"params":self.backbone.parameters()},
+                                            {"params":self.classifier.parameters()}],
+                                           lr=self.lr, weight_decay=self.weight_decay)#hparams.lr)
 #         self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=self.config.t_max, eta_min=self.config.min_lr)
 
         return {'optimizer': self.optimizer}
@@ -297,7 +320,8 @@ class LitMultiTaskModule(pl.LightningModule):
         
         return {"loss":loss,
                 "y_logit":y_logit,
-                "y_pred":y_pred}    
+                "y_pred":y_pred,
+                "y_true":y_true}
     
     def test_step(self, batch, batch_idx):
         y_logit, y_true, y_pred = self.step(batch, batch_idx)
@@ -357,6 +381,7 @@ class LitMultiTaskModule(pl.LightningModule):
         if not hasattr(self, "all_metrics"):
             self.all_metrics = {}
         
+        print(f"self.num_classes={self.num_classes}")
         if stage in ['train', 'all']:
             prefix=f'{tag}_train'.strip("_")
             self.metrics_train = get_scalar_metrics(num_classes=self.num_classes, average='macro', prefix=prefix)
@@ -378,6 +403,20 @@ class LitMultiTaskModule(pl.LightningModule):
             self.all_metrics['test'] = {"scalar":self.metrics_test,
                                         "per_class":self.metrics_test_per_class}
 
+            
+    def load_from_checkpoint(self, ckpt_path):
+        
+        ckpt = torch.load(ckpt_path, map_location=lambda storage, loc: storage)
+        state_dict = self.state_dict()
+        if "state_dict" in ckpt:
+            for k,v in ckpt["state_dict"].items():
+                if v.shape == state_dict[k].shape:
+                    state_dict[k] = v
+            self.load_state_dict(state_dict)
+        return self
+        
+            
+            
 #     def reset_metrics(self, stage: str='all'):
         
 #         self.all_metrics = self.all_metrics or {}
@@ -406,6 +445,54 @@ class LitMultiTaskModule(pl.LightningModule):
 #         plt.imshow(_to_vis(imgs))
 #         plt.figure(figsize=win_size)
 #         plt.imshow(_to_vis(imgs_aug))
+
+
+
+
+# convenience funtion to log predictions for a batch of test images
+def log_test_predictions(images, labels, outputs, predicted, test_table, log_counter):
+    # obtain confidence scores for all classes
+    scores = F.softmax(outputs.data, dim=1)
+    log_scores = scores.cpu().numpy()
+    log_images = images.cpu().numpy()
+    log_labels = labels.cpu().numpy()
+    log_preds = predicted.cpu().numpy()
+    # adding ids based on the order of the images
+    _id = 0
+    for img, label, p, s in zip(log_images, log_labels, log_preds, log_scores):
+        
+        # id, image pixels, model's guess, true label, scores for all classes
+        img_id = str(_id) + "_" + str(log_counter)
+        test_table.add_data(img_id, wandb.Image(img), p, l, *s)
+        _id += 1
+        if _id == NUM_IMAGES_PER_BATCH:
+            break
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
     

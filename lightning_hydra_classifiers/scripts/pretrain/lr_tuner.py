@@ -48,7 +48,8 @@ def run_lr_tuner(trainer: pl.Trainer,
                  datamodule: pl.LightningDataModule,
                  config: argparse.Namespace,
                  results_dir: str,
-                 group: str=None):
+                 group: str=None,
+                 strict_resume: bool=False):
 #                  run=None):
     """
     Learning rate tuner
@@ -57,23 +58,29 @@ def run_lr_tuner(trainer: pl.Trainer,
     """
     tuner_config = OmegaConf.create(DEFAULT_CONFIG)
 
-    if "lr_tuner" in config:
+    try:
+        cfg = asdict(config)
+    except TypeError:
+        cfg = OmegaConf.to_container(config, resolve=True)
+    finally:
+        cfg = dict(config)
+    
+    if "pretrain" in cfg:
         logger.info(f"Proceeding with overrides merged with default parameters")
 #         logger.info(f"overrides: {config.lr_tuner}")
 #         logger.info(f"defaults: {tuner_config}")
-        tuner_config = OmegaConf.merge(DEFAULT_CONFIG, dict(config.lr_tuner))
+        tuner_config = OmegaConf.merge(DEFAULT_CONFIG, cfg["pretrain"])
     else:
         for k, v in DEFAULT_CONFIG.items():
-            if k in config:
+            if k in cfg:
                 tuner_config.update({k:config[k]})
 
-        config.lr_tuner = OmegaConf.create(tuner_config)
+        config.pretrain = OmegaConf.create(tuner_config)
 
 
     results_path = str(Path(results_dir, "results.csv"))
     hparams_path = str(Path(results_dir, "hparams.yaml"))
     if os.path.isfile(hparams_path):
-        
         
         best_hparams = Extract.config_from_yaml(hparams_path)
         results = None
@@ -82,11 +89,16 @@ def run_lr_tuner(trainer: pl.Trainer,
         
         
         best_lr = best_hparams['lr']
-        model.config.lr = best_lr
-        model.hparams.lr = model.config.lr
-        config.model.lr = model.config.lr
+        if hasattr(model, "config"):
+            model.config.lr = best_lr
         
-#         config.model.lr = best_lr
+#         elif hasattr(model, "hparams"):
+#             model.hparams.lr = best_lr
+#         model.config.optimizer.lr = best_lr
+        model.hparams.lr = best_lr
+        config.model.lr = best_lr
+#         config.model.optimizer.lr = model.config.lr
+        
         assert config.model.lr == best_lr
 
         logger.info(f'[FOUND] Previously completed trial. Results located in file:\n`{results_path}`')
@@ -98,42 +110,33 @@ def run_lr_tuner(trainer: pl.Trainer,
                       "loss": None}
         return suggestion, results, config
     
-    try:
-        if ("batch_size" not in model.hparams) or (model.hparams.batch_size is None):
-            model.hparams.batch_size = config.data.batch_size
-#         model.hparams = OmegaConf.create(model.hparams) #, resolve=True)
-        logger.info('Using model.hparams:', model.hparams)
-    except Exception as e:
-        logger.warning(e)
-        logger.warning('conversion from Omegaconf failed', model.hparams)
-        logger.warning('continuing')
         
     with wandb.init(job_type = "lr_tune",
-                    config=dict(config),
+                    config=cfg,
                     group=group,
                     reinit=True) as run:
         logger.info(f"[Initiating Stage] lr_tuner")
     
         lr_tuner = trainer.tuner.lr_find(model,
                                          datamodule,
-                                         **config.lr_tuner)
-        # TODO: pickle lr_tuner object
+                                         **cfg["pretrain"])
         lr_tuner_results = lr_tuner.results
         best_lr = lr_tuner.suggestion()
     
         suggestion = {"lr": best_lr,
                       "loss":lr_tuner_results['loss'][lr_tuner._optimal_idx]}
         
-        model.config.lr = suggestion['lr']
-        model.hparams.lr = model.config.lr
-        config.model.lr = model.config.lr
-        config.model.optimizer.lr = model.config.lr
-        model.hparams.config.update(config.model)
+        if hasattr(model, "config"):
+            model.config.lr = suggestion['lr']
+        model.hparams.lr = suggestion['lr']
+        config.model.lr = model.hparams.lr
+#         config.model.optimizer.lr = model.hparams.lr
+        model.hparams.update(config.model)
         best_hparams = OmegaConf.create({"optimized_hparam_key": "lr",
                                          "lr":best_lr,
                                          "batch_size":config.data.batch_size,
                                          "image_size":config.data.image_size,
-                                         "lr_tuner_config":config.lr_tuner})
+                                         "lr_tuner_config":config.pretrain}) #.lr_tuner})
         results_dir = Path(results_path).parent
         os.makedirs(results_dir, exist_ok=True)
         Extract.config2yaml(best_hparams, hparams_path)
@@ -143,10 +146,12 @@ def run_lr_tuner(trainer: pl.Trainer,
         fig = lr_tuner.plot(suggest=True)
         plot_fname = 'lr_tuner_results_loss-vs-lr.png'
         plot_path = results_dir / plot_fname
+
         plt.suptitle(f"Suggested lr={best_lr:.4e} |\n| Searched {lr_tuner.num_training} lr values $\in$ [{lr_tuner.lr_min},{lr_tuner.lr_max}] |\n| bsz = {config.data.batch_size}", fontsize='small')
         plt.tight_layout()
-        plt.subplots_adjust(bottom=0.04, top=0.8)
+        plt.subplots_adjust(bottom=0.2, top=0.8)
         plt.savefig(plot_path)
+        
         if run is not None:
     #         run.summary['lr_finder/plot'] = wandb.Image(fig, caption=plot_fname)
             run.log({'lr_finder/plot': wandb.Image(str(plot_path), caption=plot_fname)})
@@ -157,8 +162,12 @@ def run_lr_tuner(trainer: pl.Trainer,
             run.log({'lr_finder/hparams': OmegaConf.to_container(best_hparams)})
             
             df = pd.DataFrame(lr_tuner.results)
-            Extract.df2csv(df, results_path)
-            run.log({"lr_finder/results":wandb.Table(dataframe=df)})
+            try:
+                Extract.df2csv(df, results_path)
+                run.log({"lr_finder/results":wandb.Table(dataframe=df)})
+            except Exception as e:
+                if hasattr(df, "to_pandas"):
+                    run.log({"lr_finder/results":wandb.Table(dataframe=df.to_pandas())})
 
     logger.info(f'FINISHED: `run_lr_tuner(config)`')
     logger.info(f'Proceeding with:\n')

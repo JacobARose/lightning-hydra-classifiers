@@ -25,6 +25,7 @@ import os
 from pathlib import Path
 from typing import Tuple, Dict, Optional
 
+from lightning_hydra_classifiers.experiments.configs.data import *
 from lightning_hydra_classifiers.data.utils.make_catalogs import CSV_CATALOG_DIR_V1_0, EXPERIMENTAL_DATASETS_DIR
 from lightning_hydra_classifiers.data.datasets.common import CSVDatasetConfig, CSVDataset, DataSplitter
 from lightning_hydra_classifiers.utils.etl_utils import ETL
@@ -36,54 +37,54 @@ __all__ = ["TransferExperiment", "TransferExperimentConfig", "Extant_to_PNAS_Exp
 
 
 
-@dataclass
-class TaskConfig:
-    name: str
-    val_split: Optional[float] = 0.2
-    test_split: Optional[float] = None
+# @dataclass
+# class TaskConfig:
+#     name: str
+#     val_split: Optional[float] = 0.2
+#     test_split: Optional[float] = None
         
 
-@dataclass
-class TransferExperimentConfig:
-    source_root_dir: str = CSV_CATALOG_DIR_V1_0
-    experiment_root_dir: str = EXPERIMENTAL_DATASETS_DIR # '/media/data_cifs/projects/prj_fossils/users/jacob/experiments/July2021-Nov2021/csv_datasets/experimental_datasets',
-    experiment_name: Optional[str] = None
-    task_0: Optional[TaskConfig] = None
-    task_1: Optional[TaskConfig] = None
+# @dataclass
+# class TransferExperimentConfig:
+#     source_root_dir: str = CSV_CATALOG_DIR_V1_0
+#     experiment_root_dir: str = EXPERIMENTAL_DATASETS_DIR # '/media/data_cifs/projects/prj_fossils/users/jacob/experiments/July2021-Nov2021/csv_datasets/experimental_datasets',
+#     experiment_name: Optional[str] = None
+#     task_0: Optional[TaskConfig] = None
+#     task_1: Optional[TaskConfig] = None
         
-    task_0_name: Optional[str] = None
-    task_1_name: Optional[str] = None
-    seed: int = 99
+#     task_0_name: Optional[str] = None
+#     task_1_name: Optional[str] = None
+#     seed: int = 99
         
 
-@dataclass
-class Extant_to_PNAS_ExperimentConfig(TransferExperimentConfig):
-    experiment_name: str = "Extant-to-PNAS-512-transfer_benchmark"
-    task_0: Optional[TaskConfig] = TaskConfig(name = 'Extant_Leaves_family_10_512_minus_PNAS_family_100_512',
-                                              val_split = 0.2,
-                                              test_split = None)
-    task_1: Optional[TaskConfig] = TaskConfig(name = 'PNAS_family_100_512_minus_Extant_Leaves_family_10_512',
-                                              val_split = 0.2,
-                                              test_split = None)        
+# @dataclass
+# class Extant_to_PNAS_ExperimentConfig(TransferExperimentConfig):
+#     experiment_name: str = "Extant-to-PNAS-512-transfer_benchmark"
+#     task_0: Optional[TaskConfig] = TaskConfig(name = 'Extant_Leaves_family_10_512_minus_PNAS_family_100_512',
+#                                               val_split = 0.2,
+#                                               test_split = None)
+#     task_1: Optional[TaskConfig] = TaskConfig(name = 'PNAS_family_100_512_minus_Extant_Leaves_family_10_512',
+#                                               val_split = 0.2,
+#                                               test_split = None)        
         
-    task_0_name: str = 'Extant_Leaves_family_10_512_minus_PNAS_family_100_512'
-    task_1_name: str = 'PNAS_family_100_512_minus_Extant_Leaves_family_10_512'
+#     task_0_name: str = 'Extant_Leaves_family_10_512_minus_PNAS_family_100_512'
+#     task_1_name: str = 'PNAS_family_100_512_minus_Extant_Leaves_family_10_512'
 
         
-@dataclass
-class Extant_to_Fossil_ExperimentConfig(TransferExperimentConfig):
-    experiment_name: str = "Extant-to-Fossil-512-transfer_benchmark"
+# @dataclass
+# class Extant_to_Fossil_ExperimentConfig(TransferExperimentConfig):
+#     experiment_name: str = "Extant-to-Fossil-512-transfer_benchmark"
         
-    task_0: Optional[TaskConfig] = TaskConfig(name = "Extant_Leaves_family_3_512",
-                                              val_split = 0.2,
-                                              test_split = 0.3)
-    task_1: Optional[TaskConfig] = TaskConfig(name = "Fossil_family_3_512",
-                                              val_split = 0.2,
-                                              test_split = 0.3)
+#     task_0: Optional[TaskConfig] = TaskConfig(name = "Extant_Leaves_family_3_512",
+#                                               val_split = 0.2,
+#                                               test_split = 0.3)
+#     task_1: Optional[TaskConfig] = TaskConfig(name = "Fossil_family_3_512",
+#                                               val_split = 0.2,
+#                                               test_split = 0.3)
 
         
-    task_0_name: str = "Extant_Leaves_family_3_512"
-    task_1_name: str = "Fossil_family_3_512"
+#     task_0_name: str = "Extant_Leaves_family_3_512"
+#     task_1_name: str = "Fossil_family_3_512"
 
 
 
@@ -103,15 +104,20 @@ class TransferExperiment:
     def parse_config(self,
                      config):
         config = config or TransferExperimentConfig()#Munch()
-        if "source_root_dir" not in asdict(config):
+        try:
+            cfg = asdict(config)
+        except:
+            cfg = dict(config)
+        if "source_root_dir" not in cfg:
             config.source_root_dir = CSV_CATALOG_DIR_V1_0
-        if "experiment_dir" not in asdict(config):
+        if "experiment_dir" not in cfg:
             config.experiment_root_dir = EXPERIMENTAL_DATASETS_DIR #"/media/data/jacob/GitHub/lightning-hydra-classifiers/notebooks/experiments_August_2021"
-        if "experiment_name" not in asdict(config) or config.experiment_name is None:
+        if "experiment_name" not in cfg or config.experiment_name is None:
+            print(f"experiment_name is None. Setting config.experiment_name = Extant-to-PNAS-512-transfer_benchmark")
             config.experiment_name = "Extant-to-PNAS-512-transfer_benchmark"
 #             config.task_0_name = "Extant_Leaves_family_10_512_minus_PNAS_family_100_512"
 #             config.task_1_name = "PNAS_family_100_512_minus_Extant_Leaves_family_10_512"
-        if "seed" not in asdict(config):
+        if "seed" not in cfg:
             config.seed = 99
 
         self.source_root_dir = config.source_root_dir

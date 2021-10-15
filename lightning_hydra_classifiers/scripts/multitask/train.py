@@ -16,13 +16,21 @@
 
 Run default experiment:
 
->> python "/media/data/jacob/GitHub/lightning-hydra-classifiers/lightning_hydra_classifiers/scripts/multitask/train.py"
+>> python "/media/data/jacob/GitHub/lightning-hydra-classifiers/lightning_hydra_classifiers/scripts/multitask/train.py" --info
 
 
 >> python "/media/data/jacob/GitHub/lightning-hydra-classifiers/lightning_hydra_classifiers/scripts/multitask/train.py" --list_available_backbones
 
 
 >> python "/media/data/jacob/GitHub/lightning-hydra-classifiers/lightning_hydra_classifiers/scripts/multitask/train.py" --gpus "7" -e 120 -res 512 -buffer 32 -nproc 4 -model efficientnet_b3 -bsz 64 -init_freeze "layer4" -pre "imagenet"
+
+
+python "/media/data/jacob/GitHub/lightning-hydra-classifiers/lightning_hydra_classifiers/scripts/multitask/train.py" --gpus "7" -e 10 -res 512 -buffer 32 -nproc 4 -model efficientnet_b3 -bsz 64 -init_freeze "layer4" -pre "imagenet" --experiment="Extant-to-Fossil-512-transfer_benchmark"
+
+
+    })
+    --experiment="Extant-to-PNAS-512-transfer_benchmark"
+    --experiment="Extant-to-Fossil-512-transfer_benchmark"
 
 """
 
@@ -51,22 +59,21 @@ import pytorch_lightning as pl
 import timm
 # torch.backends.cudnn.benchmark = True
 
-
+from dataclasses import asdict
 from rich import print as pp
 import matplotlib.pyplot as plt
 from munch import Munch
 import argparse
 import json
 from omegaconf import OmegaConf
-from typing import Tuple, Union, List
+from typing import Tuple, Union, List, Optional
 # from lightning_hydra_classifiers.data.utils.make_catalogs import *
 from lightning_hydra_classifiers.utils.dataset_management_utils import Extract
 from lightning_hydra_classifiers.utils.metric_utils import get_per_class_metrics, get_scalar_metrics
 # from lightning_hydra_classifiers.utils.logging_utils import get_wandb_logger
 from lightning_hydra_classifiers.utils.callback_utils import get_wandb_logger
 import wandb
-from lightning_hydra_classifiers.experiments.transfer_experiment import TransferExperiment
-# from lightning_hydra_classifiers.experiments.reference_transfer_experiment import CIFAR10DataModule
+from lightning_hydra_classifiers.experiments.transfer_experiment import TransferExperiment, TransferExperimentConfig, Extant_to_PNAS_ExperimentConfig, Extant_to_Fossil_ExperimentConfig
 # from lightning_hydra_classifiers.models.backbones import backbone
 # from torchinfo import summary
 # model_stats = summary(your_model, (1, 3, 28, 28), verbose=0)
@@ -90,7 +97,7 @@ import pl_bolts
 import hydra
 from hydra.core.config_store import ConfigStore
 ############################################
-logger = get_logger(name=__name__)
+logging = get_logger(name=__name__)
 ########################################################
 ########################################################
 ########################################################
@@ -101,140 +108,195 @@ logger = get_logger(name=__name__)
 def load_data(config: argparse.Namespace,
               task_id: int=0
              ) -> "DataModule":
+    
+    if not getattr(config.data, "experiment", [None]):
+        config.data.experiment = None
 
     if config.debug == True:
-        logger.warning(f"Debug mode activated, loading CIFAR10 datamodule")
+        logging.warning(f"Debug mode activated, loading CIFAR10 datamodule")
         datamodule = CIFAR10DataModule(task_id=task_id,
                                        batch_size=config.data.batch_size,
                                        image_size=config.data.image_size,
                                        image_buffer_size=config.data.image_buffer_size,
                                        num_workers=config.data.num_workers,
-                                       pin_memory=config.data.pin_memory)
+                                       pin_memory=config.data.pin_memory,
+                                       experiment_config=config.data.experiment)
     else:
+#         print(f"Creating datamodule: config=")
+#         pp(OmegaConf.to_container(config, resolve=True))
         datamodule = MultiTaskDataModule(task_id=task_id,
                                          batch_size=config.data.batch_size,
                                          image_size=config.data.image_size,
                                          image_buffer_size=config.data.image_buffer_size,
                                          num_workers=config.data.num_workers,
-                                         pin_memory=config.data.pin_memory)
+                                         pin_memory=config.data.pin_memory,
+                                         experiment_config=config.data.experiment)
     datamodule.setup()
     return datamodule
 
 
-def load_data_and_model(config: argparse.Namespace, task_id: int=0) -> Tuple["DataModule", LitMultiTaskModule]:
+
+def load_model(config: argparse.Namespace,
+               task_id: int=0,
+               ckpt_path: Optional[str]="") -> LitMultiTaskModule:
+
+#     task_id = config.system.task_ids[task_id]
+
+#     config.model.ckpt_path = str(config.system.tasks[task_id].model_ckpt_path)
+#     ckpt_path = config.model.ckpt_path
+    if os.path.isfile(ckpt_path):
+        logging.info(f"Loading from model checkpoint: {str(ckpt_path)}")
+        model = LitMultiTaskModule.load_from_checkpoint(ckpt_path, config=config.model, strict=False)
+    else:
+        if isinstance(ckpt_path, (str, Path)):
+            logging.warning(f"User specified checkpoint path doesn't exist. Best checkpoint produced during training will be copied to that location: {ckpt_path}")
+        logging.info(f"Instantiating model with hparams:")
+        logging.info(OmegaConf.to_container(config.model, resolve=True))
+        model = LitMultiTaskModule(config.model)
+
+    return model
+
+
+
+def load_data_and_model(config: argparse.Namespace, 
+                        task_id: int=0,
+                        ckpt_path: Optional[str]="") -> Tuple["DataModule", LitMultiTaskModule]:
 
     datamodule = load_data(config=config,
                            task_id=task_id)
-    config.model.num_classes = datamodule.num_classes
     
-    if os.path.isfile(str(config.model.ckpt_path)):
-        logger.info(f"Loading from model checkpoint: {str(config.model.ckpt_path)}")
-        model = LitMultiTaskModule.load_from_checkpoint(config.model.ckpt_path, config=config.model)
+
+    config.model.num_classes = datamodule.num_classes
+    for task_id_idx in range(len(config.model.multitask)):
+        task_name = config.system.task_ids[task_id_idx]
+        datamodule.set_task(task_id_idx)
+        datamodule.setup("fit")
+        config.model.multitask[task_name].num_classes = datamodule.num_classes
+        
+    datamodule.set_task(task_id)
+    datamodule.setup()
+        
+    task_name = config.system.task_ids[task_id]
+    if ckpt_path in [None, ""]:
+        config.model.ckpt_path = os.path.join(config.system.tasks[task_name].model_ckpt_dir, "model.ckpt")
     else:
-        if isinstance(config.model.ckpt_path, (str, Path)):
-            logger.warning(f"User specified checkpoint path doesn't exist. Best checkpoint produced during training will be copied to that location: {config.model.ckpt_path}")
-        logger.info(f"Instantiating model with hparams:")
-        logger.info(config.model)
-        model = LitMultiTaskModule(config.model)
+        config.model.ckpt_path = ckpt_path
+    model = load_model(config=config,
+                       task_id=task_id,
+                       ckpt_path=ckpt_path)
     model.label_encoder = datamodule.label_encoder
 
-    return datamodule, model
+    return datamodule, model, config
+
+######################################
+
+
+def configure_trainer(config, callbacks=None, logger=None) -> pl.Trainer:
+    trainer_config = resolve_config(config.trainer)
+
+    trainer_config['callbacks'] = callbacks
+    trainer_config['logger'] = logger
+    print(f"trainer_config.gpus={trainer_config['gpus']}")
+    print(f"config.data.batch_size={config.data.batch_size}")
+    trainer: pl.Trainer = hydra.utils.instantiate(trainer_config)
+    return trainer
+
+
+
+
+
+
+def resolve_config(cfg):
+    try:
+        config = cfg
+        config = asdict(config)
+    except TypeError:
+        config = OmegaConf.to_container(config, resolve=True)
+    finally:
+        config = dict(config)
+    return config
 
 
 ######################################
 
 
+def configure_callbacks(config) -> List[pl.Callback]:
+    callbacks: List[pl.Callback] = []
+    for k, cb_conf in config.callbacks.items():
+        if "_target_" in cb_conf:
+            logging.info(f"Instantiating callback <{cb_conf._target_}>")
+#             if k == "image_prediction_logger":
+#                 callbacks.append(hydra.utils.instantiate(cb_conf, datamodule=datamodule))
+#             else:
+            callbacks.append(hydra.utils.instantiate(cb_conf))
+    return callbacks
+
+
+def configure_loggers(config) -> List[pl.loggers.LightningLoggerBase]:
+    logger: List[pl.loggers.LightningLoggerBase] = []
+    for _, lg_conf in config["logger"].items():
+        if "_target_" in lg_conf:
+            logging.info(f"Instantiating logger <{lg_conf._target_}>")
+            logger.append(hydra.utils.instantiate(lg_conf))
+
+    return logger
 
 
 def train_task(config: argparse.Namespace, task_id: int=0):
     pl.seed_everything(config.seed)
 
-    datamodule, model = load_data_and_model(config=config, task_id=task_id)
-    k=15
-    img_prediction_callback = ImagePredictionLogger(top_k_per_batch=k,
-                                                    bottom_k_per_batch=k)    
-    checkpoint_callback = pl.callbacks.ModelCheckpoint(monitor=config.callbacks.monitor.metric,
-                                                       save_top_k=1,
-                                                       save_last=True,
-                                                       dirpath=str(Path(config.stages[f"task_{task_id}"].model_ckpt_dir, f"task_{task_id}")),
-                                                       filename='{epoch:02d}-{val_loss:.4f}-{val_acc:.4f}',
-                                                       verbose=True,
-                                                       mode=config.callbacks.monitor.mode)
+    datamodule, model, config = load_data_and_model(config=config, task_id=task_id)
     
-    lr_monitor_callback = pl.callbacks.LearningRateMonitor(logging_interval="step", log_momentum=True)
-    data_monitor_callback = pl_bolts.callbacks.ModuleDataMonitor(submodules=True)
-    #TrainingDataMonitor(log_every_n_steps=25)
-    earlystopping = pl.callbacks.EarlyStopping(monitor=config.callbacks.monitor.metric,
-                                               patience=3,
-                                               mode=config.callbacks.monitor.mode)
-    callbacks=[earlystopping,
-               checkpoint_callback,
-               img_prediction_callback]#,
-#                data_monitor_callback]
-    wandb_logger = pl.loggers.WandbLogger(entity = "jrose",
-                                          project = "image_classification_train",
-                                          job_type = "train_supervised",
-                                          config=dict(config),
-                                          group=f'{config.model.model_name}_task_{task_id}',
-                                          reinit=True,
-                                          dir=config.experiment_dir)
 
-    trainer = pl.Trainer(**dict(config.trainer),
-                         callbacks=callbacks)#,
-#                          logger=wandb_logger)#,
-#                 track_grad_norm=2,
-#                 weights_summary='top')
+    group=f'{config.model.backbone.backbone_name}_{config.data.experiment.experiment_name}_task_{task_id}'
+    config.logger.wandb.group = group
+    config.callbacks.log_per_class_metrics_to_wandb.class_names = datamodule.classes
+
+    callbacks = configure_callbacks(config)
+    logger = configure_logger(config)
+
+    trainer: pl.Trainer = configure_trainer(config, callbacks=callbacks, logger=logger)
 
     if config.debug == True:
         import pdb; pdb.set_trace()
 
-#     if config.model.lr is None:
-#     if True:
-#     if config.stages[f"task_{task_id}"].lr_tuner is not None:
-#     with wandb.init(job_type = "lr_tune",
-#                     config=dict(config),
-#                     group=f'{config.model.model_name}_task_{task_id}',
-#                     reinit=True) as run:
-    print('config.stages[f"task_{task_id}"]: ', config.stages[f"task_{task_id}"])
-    skip_lr_tuner = config.stages[f"task_{task_id}"].skip_lr_tuner
-    if not skip_lr_tuner:
+    if config.pretrain is not None:
 
-        logger.info(f"[Initiating Stage] lr_tuner")
+        logging.info(f"[Initiating Stage] lr_tuner")
         suggestion, lr_tuner_results, config = lr_tuner.run_lr_tuner(trainer=trainer,
                                                                      model=model,
                                                                      datamodule=datamodule,
                                                                      config=config,
-                                                                     results_dir = config.stages[f"task_{task_id}"].lr_tuner_dir,
-                                                                     group=f'{config.model.model_name}_task_{task_id}')
-    #                                                                      run=run)
+                                                                     results_dir = config.system.tasks[f"task_{task_id}"].lr_tuner_dir,
+                                                                     group=group)
+    
         print(f"model.lr={model.lr}")
         model.lr = suggestion['lr']
         print(f"model.lr={model.lr}")
-        print(f"model.config.lr={model.config.lr}")
-        model.config.lr = suggestion['lr']
         model.config.optimizer.lr = suggestion['lr']
     
     print(f"model.config.lr={model.config.lr}")
     with wandb.init(job_type = "supervised_train",
-                    config=dict(config),
-                    group=f'{config.model.model_name}_task_{task_id}',
+                    config=resolve_config(config),
+                    group=group, #f'{config.model.model_name}_task_{task_id}',
                     reinit=True) as run:
 
     #         wandb.watch(model, log='all')
-        trainer.logger = wandb_logger
-        wandb.watch(model.backbone, log='all')
-        wandb.watch(model.classifier, log='all')
+#         trainer.logger = wandb_logger
+#         wandb.watch(model.backbone, log='all')
+#         wandb.watch(model.classifier, log='all')
 
         try:
             trainer.fit(model, datamodule)
         except KeyboardInterrupt as e:
-            logger.warning("Interruption:", e)
+            logging.warning("Interruption:", e)
         finally:
-            logger.info(f"checkpoint_callback.best_model_path: {str(checkpoint_callback.best_model_path)}")
-            config.stages[f"task_{task_id}"].ckpt_path = checkpoint_callback.best_model_path
+            checkpoint_callback = [c for c in callbacks if isinstance(c, pl.callbacks.ModelCheckpoint)][0]
+            logging.info(f"checkpoint_callback.best_model_path: {str(checkpoint_callback.best_model_path)}")
+            config.system.tasks[f"task_{task_id}"].ckpt_path = checkpoint_callback.best_model_path
             checkpoint_callback.best_model_score = checkpoint_callback.best_model_score or 0.0
-            logger.info(f"checkpoint_callback.best_model_score: {checkpoint_callback.best_model_score:.3f}")
-        logger.info(f"[Initiating TESTING on task_{task_id}]")
+            logging.info(f"checkpoint_callback.best_model_score: {checkpoint_callback.best_model_score:.3f}")
+        logging.info(f"[Initiating TESTING on task_{task_id}]")
 
 
         test_results = run_multitask_test(trainer=trainer,
@@ -245,8 +307,8 @@ def train_task(config: argparse.Namespace, task_id: int=0):
     #                                       results_path=results_path)
 
 
-    logger.info(f"[FINISHED] TESTING on task_{task_id}")
-    logger.info(f"Results: {test_results}")
+    logging.info(f"[FINISHED] TESTING on task_{task_id}")
+    logging.info(f"Results: {test_results}")
     return test_results, config
 
 
@@ -267,17 +329,135 @@ def run_multitask_test(trainer: pl.Trainer,
 #         ax = [ax]
     for task_id in tasks:
 #         datamodule.set_task(task_id)
-        tag=config.stages[f"task_{task_id}"].name
+        tag=config.system.tasks[f"task_{task_id}"].task_id
 #         model.init_metrics(stage='test', tag=tag)
         trainer.logger = pl.loggers.CSVLogger("logs", name=tag)
         datamodule.setup(task_id=task_id)
-        logger.info(f"[TESTING] {tag}")
-#         ax[task_id].imshow(datamodule.test_dataset.fetch_item(0)[0])
-#         ax[task_id].set_title(f"{tag}")
+        logging.info(f"[TESTING] {tag}")
+
         test_results[task_id] = trainer.test(model, datamodule=datamodule)
         
     return test_results
     
+
+import hydra
+
+@hydra.main(config_name="config", config_path="../../../configs") #"multitask_experiment_config")
+def main(config):
+
+#     config.root_dir = "/media/data_cifs/projects/prj_fossils/users/jacob/experiments/July2021-Nov2021/experiment_logs/Transfer_Experiments"
+#     pp(f"BEFORE")
+
+    pl.seed_everything(config.seed)
+    OmegaConf.set_struct(config, False)
+#     config = ETL.init_structured_config(cfg=config,
+#                                      dataclass_type = MultiTaskExperimentConfig)
+    pp(OmegaConf.to_yaml(config, resolve=True))
+    os.makedirs(config.results_dir, exist_ok=True)
+    os.makedirs(config.callbacks.model_checkpoint.dirpath, exist_ok=True)
+    
+    os.environ["WANDB_ENTITY"] = "jrose"
+    os.environ["WANDB_PROJECT"] = "image_classification_train"
+    os.environ["WANDB_DIR"] = config.experiment_dir
+        
+#     torch.backends.cudnn.benchmark = True
+#     torch.backends.cudnn.enabled = True
+    results = {}
+    results["task_0"], config = train_task(config=config, task_id=0)
+    config.model.ckpt_path = config.system.tasks.task_0.ckpt_path
+    
+    if "task_1" in config.system.tasks.keys():
+        print(f"[Initiating] Transfer to Task_1: {config.system.tasks.task_1.task_id}")
+        print(f"[Re-loading model from checkpoint path] : {config.model.ckpt_path}")
+        #TODO Log/Cache experiment artifacts here.    
+        results["task_1"], config = train_task(config=config, task_id=1)
+        
+    print(f"[SUCCESSFULLY FINISHED TRAIN.PY]")
+    import pdb; pdb.set_trace()
+    print(type(results))
+    
+    print(type(results['task_1']))
+    
+    torch.save(results, str(Path(config.experiment_dir, "test_results.pth")))
+    logging.info(json.dumps(results))
+    if os.path.isfile(str(Path(config.experiment_dir, "test_results.pth"))):
+        logging.info(f'Congratulations, your test results are pickled using torch.save to: {str(Path(config.experiment_dir, "test_results.pth"))}')
+    else:
+        logging.warning(f'[Warning] Saving test results to {str(Path(config.experiment_dir, "test_results.pth"))} failed')
+
+
+
+
+
+
+
+        
+if __name__ == '__main__':
+    
+    main()
+
+
+
+
+
+#####################################################################
+#####################################################################
+
+
+# END
+
+#####################################################################
+#####################################################################
+    
+    
+#     callbacks: List[Callback] = []
+#     for k, cb_conf in config.callbacks.items():
+#         if "_target_" in cb_conf:
+#             logging.info(f"Instantiating callback <{cb_conf._target_}>")
+# #             if k == "image_prediction_logger":
+# #                 callbacks.append(hydra.utils.instantiate(cb_conf, datamodule=datamodule))
+# #             else:
+#             callbacks.append(hydra.utils.instantiate(cb_conf))
+
+#     logger: List[LightningLoggerBase] = []
+#     for _, lg_conf in config["logger"].items():
+#         if "_target_" in lg_conf:
+#             logging.info(f"Instantiating logger <{lg_conf._target_}>")
+#             logger.append(hydra.utils.instantiate(lg_conf))
+
+    
+
+#     wandb_logger = pl.loggers.WandbLogger(#entity = "jrose",
+# #                                           project = "image_classification_train",
+#                                           job_type = "train_supervised",
+#                                           config=asdict(config),
+#                                           group=group, #f'{config.model.model_name}_{config.data.experiment}_task_{task_id}',
+#                                           reinit=True,
+#                                           dir=config.experiment_dir)
+
+#     try:
+#         trainer_config = config.trainer
+#         trainer_config = asdict(config.trainer)
+#     except TypeError:
+#         trainer_config = OmegaConf.to_container(config.trainer, resolve=True)
+#     finally:
+#         trainer_config = dict(config.trainer)
+
+
+#     trainer_config = resolve_config(config.trainer)
+
+#     trainer_config['callbacks'] = callbacks
+#     trainer_config['logger'] = logger
+#     print(f"trainer_config.gpus={trainer_config['gpus']}")
+#     print(f"config.data.batch_size={config.data.batch_size}")
+#     trainer: pl.Trainer = hydra.utils.instantiate(trainer_config)
+    
+    
+    
+    
+
+#####################################################################
+
 
 # from lightning_hydra_classifiers.experiments.transfer_experiment import TransferExperiment
 # output_root_dir = "/media/data_cifs/projects/prj_fossils/users/jacob/experiments/July2021-Nov2021/csv_datasets/experimental_datasets"
@@ -287,173 +467,177 @@ def run_multitask_test(trainer: pl.Trainer,
 
 
 
-def cmdline_args(arg_overrides=None):
+# def cmdline_args(arg_overrides=None):
     
-#     parser = argparse.ArgumentParser(description="")
-#     subparsers = parser.add_subparsers()
-#     p = subparsers.add_parser('', help='model args')
-    p = argparse.ArgumentParser(description="")
+# #     parser = argparse.ArgumentParser(description="")
+# #     subparsers = parser.add_subparsers()
+# #     p = subparsers.add_parser('', help='model args')
+#     p = argparse.ArgumentParser(description="")
     
-    # subparser_one = parser_one.add_subparsers()
-#     p.add_argument("--tasks", dest="tasks", type=int, default=[0], nargs="*",
-#                    help="Run either task 0 or task 1.")
-    p.add_argument("-o", "--output_dir", dest="output_dir", type=str,
-                   default="/media/data_cifs/projects/prj_fossils/users/jacob/experiments/July2021-Nov2021/experiment_logs/Transfer_Experiments",
-                   help="Output root directory for experiment logs.")
-    p.add_argument("-ckpt", "--load_from_checkpoint", dest="load_from_checkpoint", type=str,
-                   default=None,
-                   help="Attempt to load model weights from checkpoint prior to training. If user desires to also load previous epoch info, use resume_from_checkpoint instead. If pointing to nonexistent file path, will attempt to copy best checkpoint produced by ModelCheckpoint callback to the specified location.")
-    p.add_argument("-resume", "--resume_from_checkpoint", dest="resume_from_checkpoint", type=str,
-                   default=None,
-                   help="Provide a path to checkpoint in order to resume previous training from beginning of the last epoch. This will override --load_from_checkpoint flag.")
-    p.add_argument("-e", "--num_epochs", dest="num_epochs", type=int, default=100,
-                   help="Number of training epochs")
-    p.add_argument("-res", "--image_size", dest="image_size", type=int, default=224,
-                   help="image_size/model input resolution")
-    p.add_argument("-buffer", "--image_buffer_size", dest="image_buffer_size", type=int, default=32,
-                   help="Additional resolution to resize images before either random (train) or center (test) crop to image_size.")
-    p.add_argument("-bsz", "--batch_size", dest="batch_size", type=int, default=32,
-                   help="batch_size")
-    p.add_argument("-nproc", "--num_workers", dest="num_workers", type=int, default=4,
-                   help="num_workers per dataloader")
-    p.add_argument("-model", "--model_name", dest="model_name", type=str, default="resnet50",
-                   help="model backbone architecture")
-    p.add_argument("-l", "--list_available_backbones", dest="list_available_backbones", action="store_true", default=False,
-                   help="List names of available model backbone architectures, then exit.")
-    p.add_argument("-init_freeze", "--init_freeze_up_to", dest="init_freeze_up_to", default=None, #"layer4",
-                   help="freeze up to and including layer name or index.")    
-    p.add_argument("-pre", "--pretrained", dest="pretrained", default="imagenet", choices=["imagenet", "True", "False"],
-                   help="Use pretrained imagenet weights or randomly initialize from scratch.")
-    p.add_argument("-lr", "--learning_rate", dest="learning_rate", type=float, default=3e-8,
-                   help="Optional Initial learning rate. Ignored for now, in the future will force skip any lr_tuner stage.")
-    p.add_argument("-l2", "--weight_decay", dest="weight_decay", type=float, default=0.0,
-                   help="Weight decay.")
-    p.add_argument("-pool", "--global_pool_type", dest="global_pool_type", default="avg", choices=["avg", "max"],
-                   help="Specify either an AdaptiveAveragePool or AdaptiveMaxPool for connecting the model base to its classifier head.")    
-    p.add_argument("--gpus", dest="gpus", type=int, default=1, nargs="*",
-                   help="Specify number of gpus or specific gpu ids.")
-    p.add_argument("-d", "--debug", dest="debug", action="store_true", default=False,
-                   help="Flag for activating debug-related settings. Currently limited to switching out datamodule to use CIFAR10")
-    args = p.parse_args(arg_overrides)
+#     # subparser_one = parser_one.add_subparsers()
+# #     p.add_argument("--tasks", dest="tasks", type=int, default=[0], nargs="*",
+# #                    help="Run either task 0 or task 1.")
+#     p.add_argument("-o", "--output_dir", dest="output_dir", type=str,
+#                    default="/media/data_cifs/projects/prj_fossils/users/jacob/experiments/July2021-Nov2021/experiment_logs/Transfer_Experiments",
+#                    help="Output root directory for experiment logs.")
+#     p.add_argument("-ckpt", "--load_from_checkpoint", dest="load_from_checkpoint", type=str,
+#                    default=None,
+#                    help="Attempt to load model weights from checkpoint prior to training. If user desires to also load previous epoch info, use resume_from_checkpoint instead. If pointing to nonexistent file path, will attempt to copy best checkpoint produced by ModelCheckpoint callback to the specified location.")
+#     p.add_argument("-resume", "--resume_from_checkpoint", dest="resume_from_checkpoint", type=str,
+#                    default=None,
+#                    help="Provide a path to checkpoint in order to resume previous training from beginning of the last epoch. This will override --load_from_checkpoint flag.")
+#     p.add_argument("-e", "--num_epochs", dest="num_epochs", type=int, default=100,
+#                    help="Number of training epochs")
+#     p.add_argument("-res", "--image_size", dest="image_size", type=int, default=224,
+#                    help="image_size/model input resolution")
+#     p.add_argument("-buffer", "--image_buffer_size", dest="image_buffer_size", type=int, default=32,
+#                    help="Additional resolution to resize images before either random (train) or center (test) crop to image_size.")
+#     p.add_argument("-bsz", "--batch_size", dest="batch_size", type=int, default=32,
+#                    help="batch_size")
+#     p.add_argument("-nproc", "--num_workers", dest="num_workers", type=int, default=4,
+#                    help="num_workers per dataloader")
+#     p.add_argument("-model", "--model_name", dest="model_name", type=str, default="resnet50",
+#                    help="model backbone architecture")
+#     p.add_argument("-exp", "--experiment", dest="experiment_name", type=str, default="Extant-to-PNAS-512-transfer_benchmark",
+#                    choices=["Extant-to-PNAS-512-transfer_benchmark", "Extant-to-Fossil-512-transfer_benchmark"],
+#                    help="Transfer experiment tag/name.")
+    
+    
+#     p.add_argument("-l", "--list_available_backbones", dest="list_available_backbones", action="store_true", default=False,
+#                    help="List names of available model backbone architectures, then exit.")
+#     p.add_argument("-init_freeze", "--init_freeze_up_to", dest="init_freeze_up_to", default=None, #"layer4",
+#                    help="freeze up to and including layer name or index.")    
+#     p.add_argument("-pre", "--pretrained", dest="pretrained", default="imagenet", choices=["imagenet", "True", "False"],
+#                    help="Use pretrained imagenet weights or randomly initialize from scratch.")
+#     p.add_argument("-lr", "--learning_rate", dest="learning_rate", type=float, default=3e-8,
+#                    help="Optional Initial learning rate. Ignored for now, in the future will force skip any lr_tuner stage.")
+#     p.add_argument("-l2", "--weight_decay", dest="weight_decay", type=float, default=0.0,
+#                    help="Weight decay.")
+#     p.add_argument("-pool", "--global_pool_type", dest="global_pool_type", default="avg", choices=["avg", "max"],
+#                    help="Specify either an AdaptiveAveragePool or AdaptiveMaxPool for connecting the model base to its classifier head.")    
+#     p.add_argument("--gpus", dest="gpus", type=int, default=1, nargs="*",
+#                    help="Specify number of gpus or specific gpu ids.")
+#     p.add_argument("-d", "--debug", dest="debug", action="store_true", default=False,
+#                    help="Flag for activating debug-related settings. Currently limited to switching out datamodule to use CIFAR10")
+#     args = p.parse_args(arg_overrides)
 
-    if args.pretrained == "True":
-        args.pretrained = True
-    elif args.pretrained == "False":
-        args.pretrained = False
+#     if args.pretrained == "True":
+#         args.pretrained = True
+#     elif args.pretrained == "False":
+#         args.pretrained = False
     
-    logger.info("Args:")
-    pp(args)
+#     logging.info("Args:")
+#     pp(args)
     
-    config = OmegaConf.create({
-        "seed":42,
-#         "num_epochs": args.num_epochs,
-#         "precision": 16,
-#         "device": torch.device('cuda' if torch.cuda.is_available() else 'cpu'),
-        "device": 'cuda' if torch.cuda.is_available() else 'cpu',
-        "output_dir":args.output_dir,
-        "debug":args.debug
-    })
+#     config = OmegaConf.create({
+#         "seed":42,
+# #         "num_epochs": args.num_epochs,
+# #         "precision": 16,
+# #         "device": torch.device('cuda' if torch.cuda.is_available() else 'cpu'),
+#         "device": 'cuda' if torch.cuda.is_available() else 'cpu',
+#         "output_dir":args.output_dir,
+#         "debug":args.debug
+#     })
 
-    config.trainer = OmegaConf.create({"precision": 16,
-                                       "max_epochs": args.num_epochs,
-                                       "gpus": args.gpus,
-                                       "resume_from_checkpoint": args.resume_from_checkpoint
-                                      })
+#     config.trainer = OmegaConf.create({"precision": 16,
+#                                        "max_epochs": args.num_epochs,
+#                                        "gpus": args.gpus,
+#                                        "resume_from_checkpoint": args.resume_from_checkpoint
+#                                       })
     
-    config.data = OmegaConf.create({
-        "image_size": args.image_size,
-        "image_buffer_size": args.image_buffer_size,
-        "batch_size": args.batch_size,
-        "num_workers": args.num_workers,
-        "pin_memory": True
-    })
-    
-    config.model = OmegaConf.create({"model_name": args.model_name,
-                                     "init_freeze_up_to":args.init_freeze_up_to,
-                                     "pretrained": args.pretrained,
-                                     "lr": args.learning_rate,
-                                     "weight_decay":args.weight_decay,
-                                     "num_classes": None,
-                                     "global_pool_type": args.global_pool_type,
-                                     "drop_rate": 0.0,
-                                     "image_size": args.image_size,
-                                     "ckpt_path": args.load_from_checkpoint,
-                                     "min_lr": 1e-6})
-    from lightning_hydra_classifiers.experiments.configs.optimizer import AdamWOptimizerConfig
-
-    config.model.optimizer = OmegaConf.structured(AdamWOptimizerConfig(lr=args.learning_rate,
-                                                                      weight_decay=args.weight_decay))
-    
-
-    config.callbacks = OmegaConf.create({"monitor":
-                              OmegaConf.create({"metric":"val_acc",
-                                     "mode": "max"})
-#                               OmegaConf.create({"metric":"val_loss",
-#                                      "mode": "min"})
-                             })
-
-    config.stages = OmegaConf.create({#"lr_tuner":True,
-                           "task_0":None,
-                           "task_1":None})
-    
-    
-    if args.list_available_backbones:
-        print(f"--list_available_backbones = True.","\nAvailable Models:")
-        pp(LitMultiTaskModule.available_backbones())
-        sys.exit()
-    
-    if config.debug:
-        config.stages.task_0 = OmegaConf.create({"name":"CIFAR10",
-                                      "task_id":0,
-                                      "skip_lr_tuner":False})
-        del config.stages.task_1
-        config.trainer.update(OmegaConf.create(max_epochs=2,
-                                    limit_train_batches=4,
-                                    limit_val_batches=4,
-                                    limit_test_batches=4,
-                                    auto_lr_find=bool(config.model.lr is not None)))
+#     config.data = OmegaConf.create({
+#         "image_size": args.image_size,
+#         "image_buffer_size": args.image_buffer_size,
+#         "batch_size": args.batch_size,
+#         "num_workers": args.num_workers,
+#         "pin_memory": True
+#     })
+#     if args.experiment_name == "Extant-to-PNAS-512-transfer_benchmark":
+#         config.data.experiment = Extant_to_PNAS_ExperimentConfig
+#     elif args.experiment_name == "Extant-to-Fossil-512-transfer_benchmark":
+#         config.data.experiment = Extant_to_Fossil_ExperimentConfig
         
-    else:
-        config.stages.task_0 = OmegaConf.create({"name":"Extant-PNAS",
-                                      "task_id":0,
-                                      "skip_lr_tuner":False})
-        config.stages.task_1 = OmegaConf.create({"name":"PNAS",
-                                      "task_id":1,
-                                      "skip_lr_tuner":False})
+#     config.model = OmegaConf.create({"model_name": args.model_name,
+#                                      "init_freeze_up_to":args.init_freeze_up_to,
+#                                      "pretrained": args.pretrained,
+#                                      "lr": args.learning_rate,
+#                                      "weight_decay":args.weight_decay,
+#                                      "num_classes": None,
+#                                      "global_pool_type": args.global_pool_type,
+#                                      "drop_rate": 0.0,
+#                                      "image_size": args.image_size,
+#                                      "ckpt_path": args.load_from_checkpoint,
+#                                      "min_lr": 1e-6})
+#     from lightning_hydra_classifiers.experiments.configs.optimizer import AdamWOptimizerConfig
 
-    if "task_1" in config.stages:
-        task_tags = config.stages.task_0.name + "-to-" + config.stages.task_1.name
-    else:
-        task_tags = config.stages.task_0.name
-        
-#     import pdb; pdb.set_trace()
-    if config.model.pretrained in ("imagenet", True):
-        weights_name = "imagenet_weights"
-    else:
-        weights_name = "random_weights"
-        
-    config.experiment_name = "_".join([task_tags, config.model.model_name, weights_name])
-    config.experiment_dir = os.path.join(config.output_dir, config.experiment_name)
+#     config.model.optimizer = OmegaConf.structured(AdamWOptimizerConfig(lr=args.learning_rate,
+#                                                                       weight_decay=args.weight_decay))
     
-    for task in config.stages.keys():
-        if config.stages[task] is None: continue
-        config.stages[task].model_ckpt_dir = str(Path(config.experiment_dir, task, "checkpoints"))
-        config.stages[task].lr_tuner_dir = str(Path(config.experiment_dir, task, "lr_tuner"))
-        config.stages[task].lr_tuner_results_path = str(Path(config.stages[task].lr_tuner_dir, "results.csv"))
-        config.stages[task].lr_tuner_hparams_path = str(Path(config.stages[task].lr_tuner_dir, "hparams.yaml"))
+
+#     config.callbacks = OmegaConf.create({"monitor":
+#                               OmegaConf.create({"metric":"val_acc",
+#                                      "mode": "max"})
+# #                               OmegaConf.create({"metric":"val_loss",
+# #                                      "mode": "min"})
+#                              })
+
+#     config.stages = OmegaConf.create({#"lr_tuner":True,
+#                            "task_0":None,
+#                            "task_1":None})
+    
+    
+#     if args.list_available_backbones:
+#         print(f"--list_available_backbones = True.","\nAvailable Models:")
+#         pp(LitMultiTaskModule.available_backbones())
+#         sys.exit()
+    
+#     if config.debug:
+#         config.stages.task_0 = OmegaConf.create({"name":"CIFAR10",
+#                                       "task_id":0,
+#                                       "skip_lr_tuner":False})
+#         del config.stages.task_1
+#         config.trainer.update(OmegaConf.create(max_epochs=2,
+#                                     limit_train_batches=4,
+#                                     limit_val_batches=4,
+#                                     limit_test_batches=4,
+#                                     auto_lr_find=bool(config.model.lr is not None)))
+        
+#     else:
+#         config.stages.task_0 = OmegaConf.create({"name":"Extant-PNAS",
+#                                       "task_id":0,
+#                                       "skip_lr_tuner":False})
+#         config.stages.task_1 = OmegaConf.create({"name":"PNAS",
+#                                       "task_id":1,
+#                                       "skip_lr_tuner":False})
+
+#     if "task_1" in config.stages:
+#         task_tags = config.stages.task_0.name + "-to-" + config.stages.task_1.name
+#     else:
+#         task_tags = config.stages.task_0.name
+        
+# #     import pdb; pdb.set_trace()
+#     if config.model.pretrained in ("imagenet", True):
+#         weights_name = "imagenet_weights"
+#     else:
+#         weights_name = "random_weights"
+        
+#     config.experiment_name = "_".join([task_tags, config.model.model_name, weights_name])
+#     config.experiment_dir = os.path.join(config.output_dir, config.experiment_name)
+    
+#     for task in config.stages.keys():
+#         if config.stages[task] is None: continue
+#         config.stages[task].model_ckpt_dir = str(Path(config.experiment_dir, task, "checkpoints"))
+#         config.stages[task].lr_tuner_dir = str(Path(config.experiment_dir, task, "lr_tuner"))
+#         config.stages[task].lr_tuner_results_path = str(Path(config.stages[task].lr_tuner_dir, "results.csv"))
+#         config.stages[task].lr_tuner_hparams_path = str(Path(config.stages[task].lr_tuner_dir, "hparams.yaml"))
 
         
-    config.lr_tuner = OmegaConf.structured(lr_tuner.LRTunerConfig(min_lr = 1e-07,
-                                                                  max_lr = 1.2,
-                                                                  num_training = 150,
-                                                                  mode = 'exponential',
-                                                                  early_stop_threshold = 8.0))
-
-        
-
-    return args, config
-
-
+#     config.lr_tuner = OmegaConf.structured(lr_tuner.LRTunerConfig(min_lr = 1e-07,
+#                                                                   max_lr = 1.2,
+#                                                                   num_training = 150,
+#                                                                   mode = 'exponential',
+#                                                                   early_stop_threshold = 8.0))
+#     return args, config
     
 # def main():
     
@@ -482,11 +666,11 @@ def cmdline_args(arg_overrides=None):
     
 #     print(f"[SUCCESSFULLY FINISHED TRAIN.PY]")
 #     torch.save(results, str(Path(config.experiment_dir, "test_results.pth")))
-#     logger.info(json.dumps(results))
+#     logging.info(json.dumps(results))
 #     if os.path.isfile(str(Path(config.experiment_dir, "test_results.pth"))):
-#         logger.info(f'Congratulations, your test results are pickled using torch.save to: {str(Path(config.experiment_dir, "test_results.pth"))}')
+#         logging.info(f'Congratulations, your test results are pickled using torch.save to: {str(Path(config.experiment_dir, "test_results.pth"))}')
 #     else:
-#         logger.warning(f'[Warning] Saving test results to {str(Path(config.experiment_dir, "test_results.pth"))} failed')
+#         logging.warning(f'[Warning] Saving test results to {str(Path(config.experiment_dir, "test_results.pth"))} failed')
 
 
 # import hydra
@@ -505,42 +689,88 @@ def cmdline_args(arg_overrides=None):
 #     trainer: TrainerConfig = TrainerConfig()
         
 
-cs = ConfigStore.instance()
-cs.store(name="config", node=MultiTaskExperimentConfig)
+# cs = ConfigStore.instance()
+# cs.store(name="config", node=MultiTaskExperimentConfig)
 
-import hydra
 
-@hydra.main(config_name="config") #"multitask_experiment_config")
-def main(cfg):
-    # NOTE: this is needed so that data is only downloaded once
-    cfg.root_dir = hydra.utils.get_original_cwd()
-    pp(f"BEFORE")
-    print(OmegaConf.to_yaml(cfg))
-    pl.seed_everything(cfg.seed)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#     ckpt_path = str(config.system.tasks[task_id].model_ckpt_path)
+#     config.model.ckpt_path = ckpt_path
+#     if os.path.isfile(ckpt_path):
+#         logging.info(f"Loading from model checkpoint: {str(ckpt_path)}")
+#         model = LitMultiTaskModule.load_from_checkpoint(ckpt_path, config=config.model)
+#     else:
+#         if isinstance(ckpt_path, (str, Path)):
+#             logging.warning(f"User specified checkpoint path doesn't exist. Best checkpoint produced during training will be copied to that location: {ckpt_path}")
+#         logging.info(f"Instantiating model with hparams:")
+#         logging.info(config.model)
+#         model = LitMultiTaskModule(config.model)
+
+
+#     img_prediction_callback = ImagePredictionLogger(top_k_per_batch=k,
+#                                                     bottom_k_per_batch=k)
+#     checkpoint_callback = pl.callbacks.ModelCheckpoint(monitor=config.callbacks.monitor.metric,
+#                                                        save_top_k=1,
+#                                                        save_last=True,
+#                                                        dirpath=str(Path(config.model.ckpt_path).parent),
+#                                                        filename='{epoch:02d}-{val_loss:.4f}-{val_acc:.4f}',
+#                                                        verbose=True,
+#                                                        mode=config.callbacks.monitor.mode)
+    
+#     lr_monitor_callback = pl.callbacks.LearningRateMonitor(logging_interval="step", log_momentum=True)
+#     data_monitor_callback = pl_bolts.callbacks.ModuleDataMonitor(submodules=True)
+#     #TrainingDataMonitor(log_every_n_steps=25)
+#     earlystopping = pl.callbacks.EarlyStopping(monitor=config.callbacks.monitor.metric,
+#                                                patience=3,
+#                                                mode=config.callbacks.monitor.mode)
+#     callbacks=[earlystopping,
+#                checkpoint_callback,
+#                img_prediction_callback]#,
+# #                data_monitor_callback]
+
 
     
-    cfg = ETL.init_structured_config(cfg=cfg,
-                                     dataclass_type = MultiTaskExperimentConfig)
-        
-    pp(cfg)
-        
-        
-        
-        
-        
-        
-        
-        
-        
-if __name__ == '__main__':
     
-    main()
-
-
-
-
-
-
+    
+    
+    
+    
+    
+    
+    
 
 
 
