@@ -34,7 +34,7 @@ from torchvision.datasets import ImageFolder
 from lightning_hydra_classifiers.utils import template_utils
 from lightning_hydra_classifiers.utils.common_utils import LabelEncoder, DataSplitter
 
-from hydra.experimental import compose, initialize
+from hydra.experimental import compose, initialize, initialize_config_dir
 # from lightning_hydra_classifiers.experiments.configs.config import *
 log = template_utils.get_logger(__name__)
 
@@ -204,9 +204,15 @@ class Load:
         User should opt for using ETL.init_structured_config instead.
         """
         overrides = overrides or []
-        with initialize(config_path=config_path,
-                        job_name=job_name):
-            cfg = compose(config_name=config_name, overrides=overrides)
+        
+        if os.path.isabs(config_path):
+            with initialize_config_dir(config_dir=config_path):
+#                                        job_name=job_name):
+                cfg = compose(config_name=config_name, overrides=overrides)
+        else:
+            with initialize(config_path=config_path,
+                            job_name=job_name):
+                cfg = compose(config_name=config_name, overrides=overrides)
             
         return cfg
 

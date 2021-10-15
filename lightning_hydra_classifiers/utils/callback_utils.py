@@ -16,6 +16,8 @@ import pytorch_lightning as pl
 from pytorch_lightning.loggers import LoggerCollection, WandbLogger
 from pytorch_lightning.utilities import rank_zero_only
 
+
+
 import wandb
 from pathlib import Path
 import subprocess
@@ -157,8 +159,8 @@ class LogConfusionMatrix(pl.Callback):
     ):
         """Gather data from single batch."""
         if self.ready:
-            self.preds.append(outputs["preds"])
-            self.targets.append(outputs["targets"])
+            self.preds.append(outputs["y_pred"].detach().cpu())
+            self.targets.append(outputs["y_true"].detach().cpu())
 
     def on_validation_epoch_end(self, trainer, pl_module):
         """Generate confusion matrix."""
@@ -166,29 +168,16 @@ class LogConfusionMatrix(pl.Callback):
             logger = get_wandb_logger(trainer)
             experiment = logger.experiment
 
-            preds = torch.cat(self.preds).cpu().numpy()
-            targets = torch.cat(self.targets).cpu().numpy()
+            preds = torch.cat(self.preds).numpy()
+            targets = torch.cat(self.targets).numpy()
 
             confusion_matrix = metrics.confusion_matrix(y_true=targets, y_pred=preds)
 
-            # set figure size
             plt.figure(figsize=(14, 8))
-
-            # set labels size
             sns.set(font_scale=1.4)
-
-            # set font size
             sns.heatmap(confusion_matrix, annot=True, annot_kws={"size": 8}, fmt="g")
-
-            # names should be uniqe or else charts from different experiments in wandb will overlap
             experiment.log({f"confusion_matrix/{experiment.name}": wandb.Image(plt)}, commit=False)
-
-            # according to wandb docs this should also work but it crashes
-            # experiment.log(f{"confusion_matrix/{experiment.name}": plt})
-
-            # reset plot
             plt.clf()
-
             self.preds.clear()
             self.targets.clear()
 
@@ -217,8 +206,8 @@ class LogF1PrecRecHeatmap(pl.Callback):
     ):
         """Gather data from single batch."""
         if self.ready:
-            self.preds.append(outputs["preds"])
-            self.targets.append(outputs["targets"])
+            self.preds.append(outputs["y_pred"].detach().cpu())
+            self.targets.append(outputs["y_true"].detach().cpu())
 
     def on_validation_epoch_end(self, trainer, pl_module):
         """Generate f1, precision and recall heatmap."""
@@ -226,8 +215,8 @@ class LogF1PrecRecHeatmap(pl.Callback):
             logger = get_wandb_logger(trainer=trainer)
             experiment = logger.experiment
 
-            preds = torch.cat(self.preds).cpu().numpy()
-            targets = torch.cat(self.targets).cpu().numpy()
+            preds = torch.cat(self.preds).numpy()
+            targets = torch.cat(self.targets).numpy()
             f1 = f1_score(preds, targets, average=None)
             r = recall_score(preds, targets, average=None)
             p = precision_score(preds, targets, average=None)
@@ -258,7 +247,14 @@ class LogF1PrecRecHeatmap(pl.Callback):
             self.targets.clear()
 
 
-
+# def get_wandb_logger(trainer: pl.Trainer):
+#     logger = trainer.logger
+#     if isinstance(logger, list):
+#         for l in logger:
+#             if isinstance(l, pl.loggers.wandb.WandbLogger):
+#                 return l
+#     else:
+#         return logger
 
 
 
@@ -299,14 +295,16 @@ class ImagePredictionLogger(pl.Callback):
         top_k_idx = sorted_idx[:self.top_k_per_batch]
         bottom_k_idx = sorted_idx[::-1][:self.bottom_k_per_batch]
         top_k = len(top_k_idx)
+        
+        logger = get_wandb_logger(trainer)
 
-        trainer.logger.experiment.log({"epoch":trainer.current_epoch,
+        logger.experiment.log({"epoch":trainer.current_epoch,
                                        **{f"bottom_k_per_batch":
                                     wandb.Image(imgs[k,:,:,:], caption=f"Pred:{y_pred[k]}, Label:{labels[k]}, prob: {np.max(probs[k]):.4f}, loss:{loss[k]:.4f}")
                                     for k in bottom_k_idx}
                                       }, commit=False)
 
-        trainer.logger.experiment.log({"epoch":trainer.current_epoch,
+        logger.experiment.log({"epoch":trainer.current_epoch,
                                        **{f"top_k_per_batch":
                                     wandb.Image(imgs[k,:,:,:], caption=f"Pred:{y_pred[k]}, Label:{labels[k]}, prob: {np.max(probs[k]):.4f}, loss:{loss[k]:.4f}") 
                                     for k in top_k_idx}

@@ -86,9 +86,9 @@ class ImagePredictionLogger(Callback):
         x, y, paths = [], [], []
         for idx, batch in enumerate(self.data_iterator):
             x_batch, y_batch = batch[:2]
-            x.append(x_batch)
-            y.append(y_batch)
-#             paths.extend(paths_batch)
+            x.append(x_batch.detach().cpu().numpy())
+            y.append(y_batch.detach().cpu().numpy())
+
             if idx*x_batch.shape[0] >= self.max_samples_per_epoch:
                 break
         if len(x)==0:
@@ -96,7 +96,6 @@ class ImagePredictionLogger(Callback):
             return
         x = torch.cat(x, 0)
         y = torch.cat(y, 0)
-#         paths = torch.stack(paths)
 
         self.current_epoch = trainer.current_epoch
         skip_epoch = self.current_epoch % self.log_every > 0
@@ -108,14 +107,18 @@ class ImagePredictionLogger(Callback):
         if model.training:
             training = True
             subset='train'
+        elif self.subset=="test":
+            training = False
+            subset='test'
         else:
             training = False
             subset='val'
+
         
         model.eval()
         logits = model.cpu()(x)
-        preds = torch.argmax(logits, -1)
-        scores = logits.softmax(1)
+        preds = torch.argmax(logits, -1).detach().cpu().numpy()
+        scores = logits.softmax(1).detach().cpu().numpy()
         
         columns = ['catalog_number',
                    'image',
@@ -223,65 +226,6 @@ class UploadCheckpointsToWandbAsArtifact(Callback):
         experiment.use_artifact(ckpts)
 
 
-# class LogConfusionMatrixToWandb(Callback):
-#     """Generate confusion matrix every epoch and send it to wandb.
-#     Expects validation step to return predictions and targets in a dict.
-#     """
-
-#     def __init__(self):
-#         self.preds = []
-#         self.targets = []
-#         self.ready = True
-
-#     def on_sanity_check_start(self, trainer, pl_module) -> None:
-#         self.ready = False
-
-#     def on_sanity_check_end(self, trainer, pl_module):
-#         """Start executing this callback only after all validation sanity checks end."""
-#         self.ready = True
-
-#     def on_validation_batch_end(
-#         self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx
-#     ):
-#         """Gather data from single batch."""
-# #         import pdb; pdb.set_trace()
-# #         if self.ready:
-# #             self.preds.append(outputs["y_pred"])
-# #             self.targets.append(outputs["y_true"])
-
-#     def on_validation_epoch_end(self, trainer, pl_module):
-#         """Generate confusion matrix."""
-#         if self.ready:
-#             logger = get_wandb_logger(trainer)
-#             experiment = logger.experiment
-
-#             preds = torch.cat(self.preds).cpu().numpy()
-#             targets = torch.cat(self.targets).cpu().numpy()
-
-#             confusion_matrix = metrics.confusion_matrix(y_true=targets, y_pred=preds)
-
-#             # set figure size
-#             plt.figure(figsize=(14, 8))
-
-#             # set labels size
-#             sns.set(font_scale=1.4)
-
-#             # set font size
-#             sns.heatmap(confusion_matrix, annot=True, annot_kws={"size": 8}, fmt="g")
-
-#             # names should be uniqe or else charts from different experiments in wandb will overlap
-#             experiment.log({f"confusion_matrix/{experiment.name}": wandb.Image(plt)}, commit=False)
-
-#             # according to wandb docs this should also work but it crashes
-#             # experiment.log(f{"confusion_matrix/{experiment.name}": plt})
-
-#             # reset plot
-#             plt.clf()
-
-#             self.preds.clear()
-#             self.targets.clear()
-
-
 class LogPerClassMetricsToWandb(Callback):
     """Generate f1, precision, recall heatmap every epoch and send it to wandb.
     Expects validation step to return predictions and targets.
@@ -292,6 +236,8 @@ class LogPerClassMetricsToWandb(Callback):
         self.preds = []
         self.targets = []
         self.ready = True
+        
+        self.annotation_class_name_max_len = 125
 
     def on_sanity_check_start(self, trainer, pl_module):
         self.ready = False
@@ -312,8 +258,8 @@ class LogPerClassMetricsToWandb(Callback):
             outputs = outputs['hidden']
         if self.ready:
             
-            self.preds.append(outputs["y_pred"].cpu())
-            self.targets.append(outputs["y_true"].cpu())
+            self.preds.append(outputs["y_pred"].detach().cpu())
+            self.targets.append(outputs["y_true"].detach().cpu())
 
     def on_validation_epoch_end(self, trainer, pl_module):
         """Generate f1, precision and recall heatmap,
@@ -321,29 +267,34 @@ class LogPerClassMetricsToWandb(Callback):
         if self.ready and len(self.preds) and len(self.targets):
             wandb_logger = get_wandb_logger(trainer=trainer)
             rank = pl_module.global_rank
-            print(f'Rank: {rank}')
-            print(f"wandb_logger.experiment={wandb_logger.experiment}")
-            print(f"dir(wandb_logger.experiment)={dir(wandb_logger.experiment)}")
-            print(f"wandb_logger.experiment.disabled={wandb_logger.experiment.disabled}")
-            print(f"wandb_logger.experiment.id={wandb_logger.experiment.id}")
-            print(f"wandb_logger.experiment.name={wandb_logger.experiment.name}")
+#             print(f'Rank: {rank}')
+#             print(f"wandb_logger.experiment={wandb_logger.experiment}")
+#             print(f"dir(wandb_logger.experiment)={dir(wandb_logger.experiment)}")
+#             print(f"wandb_logger.experiment.disabled={wandb_logger.experiment.disabled}")
+#             print(f"wandb_logger.experiment.id={wandb_logger.experiment.id}")
+#             print(f"wandb_logger.experiment.name={wandb_logger.experiment.name}")
 #             if
             if (rank > 0) or (wandb_logger is None) or (wandb_logger.experiment.id is None):
                 print(f"(wandb_logger.experiment.id is None) = {(wandb_logger.experiment.id is None)}")
                 print(f"Rank>0, skipping per class metrics\n", "="*20)
                 return
-            print(dir(wandb_logger))
+
 
             preds = torch.cat(self.preds).numpy() #.cpu().numpy()
             targets = torch.cat(self.targets).numpy() #.cpu().numpy()
+            
+#             print(f"preds.shape={preds.shape}")
+#             print(f"targets.shape={targets.shape}")
             
             self._log_per_class_scores(preds, targets, logger=wandb_logger)
             self._log_confusion_matrix(preds, targets, logger=wandb_logger)
             wandb_logger.experiment.log({f"epoch": trainer.current_epoch})
             
-            print("num_validation_samples: ", len(preds))
+#             print("num_validation_samples: ", len(preds))
             self.preds.clear()
             self.targets.clear()
+            self.preds = []
+            self.targets = []
             
     def _log_per_class_scores(self, preds: np.ndarray, targets: np.ndarray, logger):
         """
@@ -359,54 +310,69 @@ class LogPerClassMetricsToWandb(Callback):
         r = recall_score(preds, targets, average=None)
         p = precision_score(preds, targets, average=None)
 
+        
         class_indices, support = np.unique(targets, return_counts=True)
-        if len(support) < len(p):
-            s = np.zeros_like(p)
-            for i, support_class_i in zip(class_indices, support):
-#                 if i == len(p):
-                if i >= len(support)-1:
-                    break
-                s[i] = support_class_i
-            support = s
+        
+        num_classes = len(self.class_names)
+        print(f1.shape, r.shape, p.shape, support.shape)
+        
+        if len(support) < num_classes:
+            f1_full = np.zeros(num_classes)
+            r_full = np.zeros_like(f1_full)
+            p_full = np.zeros_like(f1_full)
+            support_full = np.zeros_like(f1_full)
+            
+#             for i, support_class_i in zip(class_indices, support):
+            for i, class_i in enumerate(class_indices):
+
+#                 if class_i >= len(support)-1:
+#                     break
+                f1_full[class_i] = f1[i]
+                r_full[class_i] = r[i]
+                p_full[class_i] = p[i]
+                support_full[class_i] = support[i]
+            f1 = f1_full
+            r = r_full
+            p = p_full
+            support = support_full
+            
             
         data = [f1, p, r, support]
         
-        for d in data:
-            print(f"len(d)={len(d)}")
-
+#         for d in data:
+#             print(f"len(d)={len(d)}")
         w = int(len(self.class_names)//10) + 10
         h = 10
         plt.figure(figsize=(w, h))
-        annot = bool(len(self.class_names) < 75)
+        annot = bool(len(self.class_names) < self.annotation_class_name_max_len)
         xticklabels = self.class_names if annot else []
-        print(f'len(self.class_names)={len(self.class_names)}')
-        print(f'annot: {annot}')
-        g = sns.heatmap(
-                        data,
+        yticklabels=["F1", "Precision", "Recall", "Support"]
+
+        g = sns.heatmap(data,
                         annot=annot,
                         vmin=0.0, vmax=1.0,
-                        linewidths=1,
-                        annot_kws={"size": 8},
-                        fmt=".2f",
-                        cmap=cmap,
-                        yticklabels=["F1", "Precision", "Recall", "Support"],
-                        xticklabels=xticklabels # [self.class_names[int(i)] for i in class_indices]
-                    )
-        plt.suptitle("per-class F1_Precision_Recall -- heatmap")
+                        linewidths=1, annot_kws={"size": 8}, fmt=".2f", cmap=cmap,
+                        yticklabels=yticklabels,
+                        xticklabels=xticklabels)
+        plt.suptitle(f"(M={num_classes}) per-class F1_Precision_Recall -- heatmap")
         g.set_xticklabels(g.get_xticklabels(), rotation=45, horizontalalignment='right', fontsize='medium', fontweight='light')
         g.set_yticklabels(g.get_yticklabels(), rotation=45, horizontalalignment='right', fontsize='medium', fontweight='light')
         plt.subplots_adjust(bottom=0.2, top=0.95, wspace=None, hspace=0.07)
-        # names should be uniqe or else charts from different experiments in wandb will overlap
+        
         logger.experiment.log({f"val/per_class/f1_p_r_heatmap": wandb.Image(plt)}, commit=False)
         plt.clf()
         
+#         import pdb; pdb.set_trace()
+        
+        logger.experiment.log({f"val/per_class/f1_p_r_table": wandb.Table(dataframe=pd.DataFrame(np.stack(data).T, index=xticklabels, columns=yticklabels).T)}, commit=False)
         
         num_samples = len(preds)
         idx = list(range(len(self.class_names)))
         
         for j, metric in enumerate(["F1", "Precision", "Recall"]):
-            print(f"metric={metric},", f"len(data[j])={len(data[j])}")
+#             print(f"metric={metric},", f"len(data[j])={len(data[j])}")
             metric_data = pd.DataFrame(data[j]).T.to_records()
+            print(f"val/per_class/{metric}_distributions: metric_data[0].shape={metric_data.shape}")
             logger.experiment.log({f"val/per_class/{metric}_distributions" : wandb.plot.line_series(xs=idx,
                                                                                                   ys=metric_data,
                                                                                                   keys=self.class_names,
@@ -435,8 +401,6 @@ class LogPerClassMetricsToWandb(Callback):
         h = int(len(self.class_names)//10)
         w = h + 10
         plt.figure(figsize=(w, h))
-#         plt.figure(figsize=(14, 8))
-#         sns.set(font_scale=1.4)
         
         annot = bool(confusion_matrix.shape[0] < 75)
         xticklabels = self.class_names if annot else []
@@ -455,7 +419,7 @@ class LogPerClassMetricsToWandb(Callback):
         g.set_yticklabels(g.get_yticklabels(), rotation=45, horizontalalignment='right', fontsize='small', fontweight='light')
         plt.subplots_adjust(bottom=0.2, top=0.95, wspace=None, hspace=0.07)
 
-        # names should be uniqe or else charts from different experiments in wandb will overlap
+        print(f"val/confusion_matrix/{logger.experiment.name}")
         logger.experiment.log({f"val/confusion_matrix/{logger.experiment.name}": wandb.Image(plt)}, commit=False)
         plt.clf()
 
