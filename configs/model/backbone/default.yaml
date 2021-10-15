@@ -1,0 +1,8 @@
+
+
+
+defaults:
+    - base_backbone
+
+backbone_name: "resnet50"
+

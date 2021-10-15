@@ -1,0 +1,69 @@
+    
+root_dir: '${root_dir}/artifacts'
+model_root_dir: '${model.model_dir}'
+
+#"${.root_dir}/models"
+
+
+input_dataset_artifact:
+    basename: '${.name}'
+    name: '${datamodule.name}'
+    project: "image_classification_datasets"
+    entity: "jrose"
+    version: "latest"
+    type: "raw_data"
+    artifact_type: "InputArtifact"
+    description: null
+#     root_dir: '${root_dir}/artifacts'
+    root_dir: '${..root_dir}'
+    uri: '${.entity}/${.project}/${.name}:${.version}'
+
+input_model_artifact:
+    basename: '${model.basename}_imagenet'
+    name: '${.basename}_${.type}_${..input_dataset_artifact.name}'
+    project: "image_classification_train"
+    entity: "jrose"
+    version: "latest"
+    artifact_type: "InputModelArtifact"
+    description: null
+    model_stage: "init"
+    type: '${.model_stage}_model'
+#     root_dir: '${root_dir}/artifacts'
+#     model_dir: '${.root_dir}/models'
+#     model_path: '${.model_dir}/${.model_stage}/${.name}/best_model.ckpt'
+    root_dir: '${..root_dir}'
+    model_dir: '${..model_root_dir}/${.basename}/${.model_stage}'
+    model_path: '${.model_dir}/best_model.ckpt'
+#     model_path: '${..model_dir}/${.model_stage}/${.name}/best_model.ckpt'
+#     hparams_path: 
+    reset_classifier:
+        source_num_classes: 1000
+        target_num_classes: ${model.num_classes}
+    datasets_seen: []
+    uri: '${.entity}/${.project}/${.name}:${.version}'
+
+
+output_model_artifact:
+    basename: '${model.basename}_${datamodule.name}'
+    name: '${.basename}_${.type}'
+    project: "image_classification_train"
+    entity: "jrose"
+    version: "latest"
+    artifact_type: "OutputModelArtifact"
+    description: "${.name}"
+    model_stage: 'train'
+    type: '${.model_stage}_model'
+#     root_dir: '${root_dir}/artifacts'
+#     model_dir: "${.root_dir}/models"
+#     model_path: "${.model_dir}/${.model_stage}/${.name}/best_model.ckpt"
+    root_dir: '${..root_dir}'
+    model_dir: '${..model_root_dir}/${.basename}/${.model_stage}'
+    model_path: '${.model_dir}/best_model.ckpt'
+    uri: '${.entity}/${.project}/${.name}:${.version}'
+#     model_dir: '${..model_dir}'
+#     model_path: '${..model_dir}/${.model_stage}/${.name}/best_model.ckpt'
+    datasets_seen: []
+
+    
+    
+    

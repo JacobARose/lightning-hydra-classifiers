@@ -1,0 +1,25 @@
+
+
+_target_: lightning_hydra_classifiers.experiments.multitask.datamodules.MultiTaskDataModule
+image_size: 512
+image_buffer_size: 32
+batch_size: 32
+num_workers: 4
+pin_memory: true
+dataset_name: ??? #"Extant-PNAS_to_PNAS"
+experiment:
+    source_root_dir: "/media/data_cifs/projects/prj_fossils/users/jacob/experiments/July2021-Nov2021/csv_datasets/leavesdb-v1_0"
+    experiment_root_dir: "/media/data_cifs/projects/prj_fossils/users/jacob/experiments/July2021-Nov2021/csv_datasets/experimental_datasets"
+    experiment_name: ??? #"Extant-to-PNAS-512-transfer_benchmark"
+    seed: '${seed}'
+    task_0:
+        name: ??? # "Extant_Leaves_family_10_512_minus_PNAS_family_100_512"
+        val_split: 0.0
+        test_split: null
+    task_1:
+        name: ??? # "PNAS_family_100_512_minus_Extant_Leaves_family_10_512"
+        val_split: 0.0
+        test_split: null
+
+
+

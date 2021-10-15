@@ -1,0 +1,129 @@
+# @package _global_
+
+# Created Tuesday, April 20th, 2021
+# Author: Jacob A Rose
+# 
+
+# to execute this experiment run:
+# python run.py +experiment=1_extant_exp_example_full
+
+defaults:
+#     - override /logger: many_loggers.yaml
+
+    - override /hydra/hydra_logging: colorlog
+    - override /hydra/job_logging: colorlog
+    
+#     - override /trainer: null  # override trainer to null so it's not loaded from main config defaults...
+#     - override /model: null #resnet_model.yaml
+#     - override /datamodule: null #extant_datamodule.yaml
+#     - override /callbacks: null #wandb_callbacks.yaml # default_callbacks.yaml  # set this to null if you don't want to use callbacks
+
+
+root_dir: ${oc.env:WANDB_CACHE_DIR}
+# results_dir: '${model.model_dir}/results'
+
+seed: 12345
+print_config: true
+
+
+trainer:
+    _target_: pytorch_lightning.Trainer
+    gpus: [2]
+    auto_select_gpus: true
+#     precision: 16
+#     accelerator: 'ddp'
+    min_epochs: 1
+    max_epochs: 10
+
+    weights_summary: "top"
+#     progress_bar_refresh_rate: 10
+
+    profiler: "simple"
+#     log_every_n_steps: 50 
+#     terminate_on_nan: False
+
+#     fast_dev_run: false
+#     limit_train_batches: 1.0
+#     limit_val_batches: 1.0
+    
+    amp_backend: "native"
+    amp_level: "02"
+    precision: 16
+
+    auto_scale_batch_size: 'power'
+    
+    # resume_from_checkpoint: ${work_dir}/last.ckpt
+
+
+
+datamodule:
+#     _target_: contrastive_learning.data.pytorch.pnas.PNASLightningDataModule
+    _target_: contrastive_learning.data.pytorch.datamodules.build_datamodule
+    #get_datamodule
+
+#     basename: "PNAS"
+#     name: '${.basename}_family_100_${.image_size}'
+    basename: "Extant"
+    name: '${.basename}_family_10_${.image_size}'
+    batch_size: null
+    val_split: 0.2
+    classes: null
+    num_classes: null
+    image_size: 1024
+    channels: 3
+    class_type: "family"
+    normalize: true
+    seed: '${seed}'
+    predict_on_split: "val"
+#     debug: false
+    num_workers: 4
+    root_dir: ${root_dir}
+    dataset_dir: ${.root_dir}/datasets/${.name}
+
+
+
+model:
+    _target_: lightning_hydra_classifiers.models.transfer.TransferLearningModel
+    
+    classifier:
+        _target_: lightning_hydra_classifiers.models.transfer.Classifier
+        backbone_name: 'resnet50'
+        num_classes: '${datamodule.num_classes}'
+        finetune: true
+
+    train_bn: '${callbacks.finetuning.train_bn}'
+    milestones: '${callbacks.finetuning.milestones}'
+    batch_size: '${datamodule.batch_size}'
+    optimizer: "Adam"
+    lr: 0.001
+    lr_scheduler_gamma: 0.1
+    num_workers: 6
+
+
+
+callbacks:
+    finetuning:
+        _target_: lightning_hydra_classifiers.models.transfer.MilestonesFinetuning
+        milestones: [5, 10]
+        train_bn: false
+
+job_type: "tune-train-test"
+
+
+logger:
+    wandb:
+        _target_: pytorch_lightning.loggers.wandb.WandbLogger
+        entity: '${oc.env:WANDB_ENTITY}' # "jrose"
+        project: "mnist_scaling_experiments"
+        job_type: '${job_type}'
+        group: "single-gpu"
+
+    tensorboard:
+        _target_: pytorch_lightning.loggers.tensorboard.TensorBoardLogger
+        save_dir: "${root_dir}/tensorboard/"
+        name: "${job_type}_${datamodule.name}"
+
+
+#     wandb:
+#         tags: ["best_model", "uwu"]
+#         notes: "Description of this model."

@@ -1,15 +1,18 @@
 # @package _global_
 
-# specify here default training configuration
+
 defaults:
-    - trainer: default_trainer.yaml
-    - model: resnet_model.yaml
-    - datamodule: pnas_datamodule.yaml # mnist_datamodule.yaml
-    - callbacks: wandb_callbacks.yaml # default_callbacks.yaml  # set this to null if you don't want to use callbacks
+    - model: default #resnet50
+    - data: default # extant_minus_pnas
+    - trainer: default
+    - callbacks: wandb_callbacks.yaml # default_callbacks.yaml
     - logger: many_loggers.yaml # null  e.g. `python run.py logger=wandb`
-    - wandb: init.yaml
-    - artifacts: input_artifacts.yaml
-    - tuner: default_tuner.yaml
+    - system: multi_task_file_system
+    - pretrain: default
+    - _self_
+#     - wandb: init.yaml
+#     - artifacts: input_artifacts.yaml
+#     - tuner: default_tuner.yaml
 #     - experiment: null
 #     - hparams_search: null
 
@@ -17,45 +20,30 @@ defaults:
 #     - override hydra/job_logging: colorlog
 
 
-# path to original working directory
-# hydra hijacks working directory by changing it to the current log directory,
-# so it's useful to have this path as a special variable
-# learn more here: https://hydra.cc/docs/next/tutorials/basic/running_your_app/working_directory
-# work_dir: ${hydra:runtime.cwd}
+# root_dir: ${oc.env:WANDB_CACHE_DIR}
 
+root_dir: "/media/data_cifs/projects/prj_fossils/users/jacob/experiments/July2021-Nov2021/experiment_logs/Transfer_Experiments"
 
-# path to folder with data
-# data_dir: ${work_dir}/data/
-root_dir: ${oc.env:WANDB_CACHE_DIR}
-results_dir: '${model.model_dir}/results'
+replicate: '${system.replicate}'
+experiment_name: '${data.experiment.experiment_name}-${model.backbone_name}'
+experiment_dir: '${root_dir}/${experiment_name}/replicate_${replicate}'
+results_dir: '${experiment_dir}/results'
+checkpoint_dir: '${results_dir}/checkpoints/'
 
-
-# use `python run.py debug=true` for easy debugging!
-# this will run 1 train, val and test loop with only 1 batch
-# equivalent to running `python run.py trainer.fast_dev_run=true`
-# (this is placed here just for easier access from command line)
+seed: 96857
 debug: False
-
-
-# pretty print config at the start of the run using Rich library
 print_config: True
-
-
-# disable python warnings if they annoy you
 disable_warnings: True
 
 
 hydra:
-    # output paths for hydra logs
-    run:
-        dir: logs/runs/${now:%Y-%m-%d}/${now:%H-%M-%S}
-    sweep:
-        dir: logs/multiruns/${now:%Y-%m-%d_%H-%M-%S}
-        subdir: ${hydra.job.num}
+#     run:
+#         dir: hydra-logs/runs/${now:%Y-%m-%d}/${now:%H-%M-%S}
+#     sweep:
+#         dir: hydra-logs/multiruns/${now:%Y-%m-%d_%H-%M-%S}
+#         subdir: ${hydra.job.num}
 
     job:
-        # you can set here environment variables that are universal for all users
-        # for system specific variables (like data paths) it's better to use .env file!
         env_set:
             # currently there are some issues with running sweeps alongside wandb
             # https://github.com/wandb/client/issues/1314

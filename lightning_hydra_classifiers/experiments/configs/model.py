@@ -62,6 +62,7 @@ class BaseLitModuleConfig(BaseConfig):
 
     backbone: BackboneConfig = BackboneConfig(backbone_name="resnet50")
     optimizer: OptimizerConfig = AdamWOptimizerConfig()
+    ckpt_path: Optional[str] = None
     
 
         
@@ -106,4 +107,4 @@ def register_configs() -> None:
 #     )
 
 
-register_configs() 
+# register_configs() 

@@ -1,0 +1,32 @@
+
+_target_: contrastive_learning.data.pytorch.fossil.FossilLightningDataModule
+
+
+name: '${.kwargs.basename}_${.image_size}'
+val_train_split: 0.2
+test_split: 0.3
+threshold: 3
+batch_size: 256
+seed: 987485
+num_workers: 0
+normalize: true
+
+num_classes: null
+image_size: 512
+color_mode: "grayscale"
+channels: 3
+class_type: "family"
+predict_on_split: "val"
+debug: '${debug}'
+
+
+kwargs:
+    basename: "Fossil"
+
+
+# root_dir: ${root_dir}
+# dataset_dir: ${.root_dir}/datasets/${.name}
+
+
+
+

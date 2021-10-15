@@ -5,8 +5,7 @@ wandb:
     entity: '${oc.env:WANDB_ENTITY}' # "jrose"
     project: "image_classification"
     job_type: "train"
-    group: "${model.backbone.backbone_name}_${data.experiment.experiment_name}"
-#     dir: '${results_dir}/logs'
+    group: "stage_0"
     
     
     

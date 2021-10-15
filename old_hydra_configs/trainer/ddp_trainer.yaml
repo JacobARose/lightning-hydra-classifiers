@@ -1,0 +1,26 @@
+_target_: pytorch_lightning.Trainer
+
+# set `1` to train on GPU, `0` to train on CPU only
+gpus: [0,1]
+auto_select_gpus: true
+
+min_epochs: 1
+max_epochs: 40
+
+weights_summary: "top"
+progress_bar_refresh_rate: 2
+
+profiler: "simple"
+log_every_n_steps: 50
+terminate_on_nan: False
+
+fast_dev_run: false
+limit_train_batches: 1.0
+limit_val_batches: 1.0
+
+accelerator: 'ddp'
+amp_backend: "native"
+amp_level: "02"
+precision: 16
+
+benchmark: true

@@ -1,0 +1,10 @@
+
+defaults:
+    - base_backbone
+    
+backbone_name: "efficientnet_b3"
+# pretrained: "imagenet"
+# global_pool_type: "avg"
+# drop_rate: 0.0
+# init_freeze_up_to: null
+

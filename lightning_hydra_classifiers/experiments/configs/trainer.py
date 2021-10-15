@@ -54,7 +54,7 @@ class TrainerConfig:
     log_every_n_steps: int = 50
     accelerator: Any = None  # Union[str, Accelerator, NoneType]
     sync_batchnorm: bool = False
-    precision: int = 32
+    precision: int = 16 # 32
     weights_summary: Optional[str] = "full"
     weights_save_path: Optional[str] = None
     num_sanity_val_steps: int = 2
@@ -70,9 +70,9 @@ class TrainerConfig:
     auto_scale_batch_size: Any = False  # Union[str, bool]
     prepare_data_per_node: bool = True
     plugins: Any = None   # Union[str, list, NoneType]
-    amp_backend: str = "native"
-    amp_level: str = "O2"
-    distributed_backend: Optional[str] = None
-    automatic_optimization: Optional[bool] = None
-    move_metrics_to_cpu: bool = False
-    enable_pl_optimizer: bool = False
+#     amp_backend: str = "native"
+#     amp_level: str = "O2"
+#     distributed_backend: Optional[str] = None
+#     automatic_optimization: Optional[bool] = None
+#     move_metrics_to_cpu: bool = False
+#     enable_pl_optimizer: bool = False

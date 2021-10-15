@@ -1,0 +1,39 @@
+
+
+defaults:
+    - base_file_system
+
+
+# replicate: 1
+experiment_name: '${experiment_name}'
+root_dir: '.'
+experiment_dir: '${experiment_dir}'
+task_ids: ['task_0', 'task_1']
+hashname: ''
+# overwrite_previous_runs: false
+# tasks:
+#     task_0:
+#         replicate: '${..replicate}'
+#         experiment_name: '${..experiment_name}'
+#         root_dir: '${..root_dir}'
+#         experiment_dir: '${..experiment_dir}'
+#         task_id': 'task_0'
+#         hashname': ''
+
+#         task_dir: '${.experiment_dir}/tasks/replicate_${.replicate}/${.task_id}'
+#         model_ckpt_dir: '${.task_dir}/checkpoints'
+#         lr_tuner_dir: '${.task_dir}/lr_tuner'
+#         lr_tuner_results_path: '${.lr_tuner_dir}/results.csv'
+#         lr_tuner_hparams_path: '${.lr_tuner_dir}/hparams.yaml'
+#     task_1:
+#         replicate: '${..replicate}'
+#         experiment_name: '${..experiment_name}'
+#         root_dir: '${..root_dir}'
+#         experiment_dir: '${..experiment_dir}'
+#         task_id: 'task_1'
+#         hashname: ''
+#         task_dir: '${.experiment_dir}/tasks/replicate_${.replicate}/${.task_id}'
+#         model_ckpt_dir: '${.task_dir}/checkpoints'
+#         lr_tuner_dir: '${.task_dir}/lr_tuner'
+#         lr_tuner_results_path: '${.lr_tuner_dir}/results.csv'
+#         lr_tuner_hparams_path: '${.lr_tuner_dir}/hparams.yaml'

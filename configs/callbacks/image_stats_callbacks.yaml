@@ -1,0 +1,8 @@
+
+
+image_stats_accumulator:
+    _target_: lightning_hydra_classifiers.callbacks.image_stats_callbacks.ImageStatsAccumulatorCallback
+    name: "image_stats"
+    cache_dir: '${results_dir}/image_stats'
+    clear_cache: true
+

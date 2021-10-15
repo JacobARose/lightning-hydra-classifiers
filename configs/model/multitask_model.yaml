@@ -1,0 +1,30 @@
+
+
+backbone:
+#     _target_: lightning_hydra_classifiers.experiments.multitask.modules.BackboneConfig
+    backbone_name: 'resnet50'
+    pretrained: 'imagenet'
+    global_pool_type: 'avg'
+    drop_rate: 0.0
+    init_freeze_up_to: null
+    multitask:
+#         _target_: lightning_hydra_classifiers.experiments.multitask.modules.MultiTaskClassifierConfig
+        task_0: 
+            _target_: lightning_hydra_classifiers.experiments.multitask.modules.ClassifierConfig
+            in_features: null
+            num_classes: 91
+        task_0: 
+            _target_: lightning_hydra_classifiers.experiments.multitask.modules.ClassifierConfig
+            in_features: null
+            num_classes: 19
+            
+
+
+train_bn: '${callbacks.finetuning.train_bn}'
+milestones: '${callbacks.finetuning.milestones}'
+batch_size: '${hparams.batch_size}'
+optimizer: "Adam"
+lr: '${hparams.lr}'
+lr_scheduler_gamma: 0.1
+
+model_dir: null

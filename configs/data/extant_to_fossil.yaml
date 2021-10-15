@@ -1,0 +1,18 @@
+
+defaults:
+    - base_data
+    
+dataset_name: "Extant_to_Fossil"
+experiment:
+    experiment_name: "Extant-to-Fossil-512-transfer_benchmark"
+    task_0:
+        name: "Extant_Leaves_family_3_512"
+        val_split: 0.2
+        test_split: 0.3
+    task_1:
+        name: "Fossil_family_3_512"
+        val_split: 0.2
+        test_split: 0.3
+
+
+

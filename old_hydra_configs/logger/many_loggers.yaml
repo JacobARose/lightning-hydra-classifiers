@@ -1,0 +1,8 @@
+# train with many loggers at once
+
+defaults:
+    - wandb.yaml
+    - csv.yaml
+    # - neptune.yaml
+    # - comet.yaml
+    # - tensorboard.yaml

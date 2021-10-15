@@ -1,0 +1,12 @@
+options:
+    batch_size:
+        force_rerun: false
+
+trainer_kwargs:
+    auto_scale_batch_size: 'power' # 'binsearch'  # true
+
+tuner_kwargs:
+    batch_size: null
+#         init_val: '${datamodule.batch_size}'
+#         max_trials: 10
+#         steps_per_trial: 3

@@ -1,11 +1,50 @@
 defaults:
-    - default_callbacks.yaml
+    - base_callbacks.yaml
 
 
 log_per_class_metrics_to_wandb:
     _target_: lightning_hydra_classifiers.callbacks.wandb_callbacks.LogPerClassMetricsToWandb
+    class_names: null
 
 
+image_prediction_logger:
+    _target_: lightning_hydra_classifiers.utils.callback_utils.ImagePredictionLogger
+
+    top_k_per_batch: 5
+    bottom_k_per_batch: 5
+
+
+watch_model_with_wandb:
+    _target_: lightning_hydra_classifiers.callbacks.wandb_callbacks.WatchModelWithWandb
+    log: "gradients"
+    log_freq: 100
+
+# log_f1_prec_rec_heat_map:
+#     _target_: lightning_hydra_classifiers.utils.callback_utils.LogF1PrecRecHeatmap
+
+
+
+# upload_code_as_artifact:
+#     _target_: lightning_hydra_classifiers.utils.callback_utils.UploadCodeAsArtifact
+#     code_dir: "/media/data/jacob/GitHub/lightning-hydra-classifiers/"
+    
+# upload_checkpoints_as_artifact:
+#     _target_: lightning_hydra_classifiers.utils.callback_utils.UploadCheckpointsAsArtifact
+#     ckpt_dir: '${checkpoint_dir}'
+
+# log_confusion_matrix:
+#     _target_: lightning_hydra_classifiers.utils.callback_utils.LogConfusionMatrix
+
+
+
+
+#     datamodule: ???
+#     log_every_n_epochs: 5
+#     subset: 'test'
+#     max_samples_per_epoch: 64
+#     fix_catalog_number: false
+
+    
 # early_stopping:
 #     _target_: pytorch_lightning.callbacks.early_stopping.EarlyStopping
 #     code_dir: ${work_dir}

@@ -1,0 +1,10 @@
+# options:
+#     lr:
+#         force_rerun: false
+
+
+min_lr: 1e-08
+max_lr: 1
+num_training: 100
+mode: 'exponential'
+early_stop_threshold: 4.0

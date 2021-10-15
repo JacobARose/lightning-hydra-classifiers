@@ -1,0 +1,19 @@
+defaults:
+    - default_callbacks.yaml
+
+
+log_per_class_metrics_to_wandb:
+    _target_: lightning_hydra_classifiers.callbacks.wandb_callbacks.LogPerClassMetricsToWandb
+
+
+# early_stopping:
+#     _target_: pytorch_lightning.callbacks.early_stopping.EarlyStopping
+#     code_dir: ${work_dir}
+#     monitor: 'val_loss'
+#     patience: 3
+#     verbose: false
+#     mode: "min"
+
+module_data_monitor:
+    _target_: pl_bolts.callbacks.ModuleDataMonitor
+

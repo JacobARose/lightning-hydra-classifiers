@@ -1,0 +1,53 @@
+# @package _global_
+
+# Created Tuesday, April 20th, 2021
+# Author: Jacob A Rose
+# 
+
+# to execute this experiment run:
+# python run.py +experiment=1_extant_exp_example_full
+
+defaults:
+#     - override /logger: many_loggers.yaml
+
+    - override /hydra/hydra_logging: colorlog
+    - override /hydra/job_logging: colorlog
+    
+    - override /trainer: null  # override trainer to null so it's not loaded from main config defaults...
+    - override /model: resnet_model.yaml
+    - override /datamodule: extant_datamodule.yaml
+    - override /callbacks: wandb_callbacks.yaml # default_callbacks.yaml  # set this to null if you don't want to use callbacks
+
+
+# we override default configurations with nulls to prevent them from loading at all
+# instead we define all modules and their paths directly in this config,
+# so everything is stored in one place for more readibility
+
+seed: 12345
+
+trainer:
+    _target_: pytorch_lightning.Trainer
+    gpus: 1
+#     precision: 16
+#     accelerator: 'ddp'
+    min_epochs: 1
+    max_epochs: 40
+
+    weights_summary: "top"
+    progress_bar_refresh_rate: 10
+
+    profiler: "simple"
+    log_every_n_steps: 50 
+    terminate_on_nan: False
+
+    fast_dev_run: false
+    limit_train_batches: 1.0
+    limit_val_batches: 1.0
+    
+    # resume_from_checkpoint: ${work_dir}/last.ckpt
+
+
+# logger:
+#     wandb:
+#         tags: ["best_model", "uwu"]
+#         notes: "Description of this model."

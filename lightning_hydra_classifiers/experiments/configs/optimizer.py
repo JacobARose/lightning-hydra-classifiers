@@ -44,17 +44,17 @@ class AdamOptimizerConfig(OptimizerConfig):
 def register_configs() -> None:
     cs = ConfigStore.instance()
     cs.store(
-        group="optimizer",
+        group="model.optimizer",
 #         package="config",
         name="AdamW",
         node=AdamWOptimizerConfig,
     )
     cs.store(
-        group="optimizer",
+        group="model.optimizer",
 #         package="config",
         name="Adam",
         node=AdamOptimizerConfig,
     )
 
     
-register_configs()
+# register_configs()

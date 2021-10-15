@@ -29,7 +29,7 @@ from hydra.core.config_store import ConfigStore
 from omegaconf import MISSING
 
 
-__all__ =  ["MultiTaskExperimentConfig", "BaseExperimentConfig"]
+__all__ =  ["MultiTaskExperimentConfig", "BaseExperimentConfig", "register_configs"]
 
 # @dataclass
 # class MetaDataConfig
@@ -49,7 +49,7 @@ class BaseExperimentConfig(BaseConfig):
 
 #     defaults: List[Any] = field(default_factory=list)
     
-    root_dir: str = ""# MISSING
+    root_dir: str = ""
     seed: int = 3899#MISSING
     replicate: int = 1 #MISSING
     overwrite_previous_runs: Optional[bool] = False
@@ -74,7 +74,7 @@ class BaseExperimentConfig(BaseConfig):
                    f"{self.model.backbone.weights_tag}-weights"])
         
     
-    def run_dir(self, hashname: str, replicate: int):
+    def run_dir(self, hashname: str=None, replicate: int=None):
         """The location where any run is stored."""
         hashname = hashname or self.hashname
         replicate = replicate or self.replicate
@@ -123,10 +123,21 @@ class SingleTaskExperimentConfig(BaseExperimentConfig):
 
 
 
-_defaults = [{"model@config.model":"LitMultiTaskModuleConfig"}]
+# _defaults = [{"model@config.model":"LitMultiTaskModuleConfig"}]
 #             "_self_"]
 #      {"seed": "97865"}]
 #      {"root_dir": "."}
+
+@dataclass
+class MonitorMetricConfig:
+    metric: str = "val_acc"
+    mode: str = "max"
+
+@dataclass
+class CallbacksConfig:
+    
+    monitor: MonitorMetricConfig = field(default_factory=MonitorMetricConfig)
+
 
 
 
@@ -138,13 +149,18 @@ class MultiTaskExperimentConfig(BaseExperimentConfig):
 #     seed: int = 1234
 #     replicate: int = 1
 #     overwrite_previous_runs: bool = False
-    defaults: List[Any] = field(default_factory=lambda: _defaults)
+#     defaults: List[Any] = field(default_factory=lambda: _defaults)
 
     model: LitMultiTaskModuleConfig = field(default_factory=LitMultiTaskModuleConfig)
     data: MultiTaskDataModuleConfig = field(default_factory=MultiTaskDataModuleConfig)
     trainer: TrainerConfig = field(default_factory=TrainerConfig)
+    callbacks: CallbacksConfig = field(default_factory=CallbacksConfig)
+        
     pretrain: LRTunerConfig = field(default_factory=LRTunerConfig)
     system: Optional[MultiTaskFileSystemConfig] = field(init=False) # None
+        
+        
+    debug: bool = False
 #     task_ids: Tuple[str] = field(default_factory=lambda: ("task_0", "task_1"))
     # TODO: Add structured config for orchestrating image statistics logging pre-running anything else
     
@@ -154,11 +170,13 @@ class MultiTaskExperimentConfig(BaseExperimentConfig):
                                                 experiment_name=self.get_experiment_name(),
                                                 root_dir=self.root_dir,
                                                 hashname=self.hashname)
+#         self.model.ckpt_path =
 
 
-cs = ConfigStore.instance()
-cs.store(name="multitask_experiment_config",
-         node=MultiTaskExperimentConfig)
+def register_configs():
+    cs = ConfigStore.instance()
+    cs.store(name="config",
+             node=MultiTaskExperimentConfig)
 
 
 

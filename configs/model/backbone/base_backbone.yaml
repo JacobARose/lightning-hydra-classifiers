@@ -1,0 +1,8 @@
+
+
+backbone_name: ??? # null #"resnet50"
+pretrained: "imagenet"
+global_pool_type: "avg"
+drop_rate: 0.0
+init_freeze_up_to: null
+

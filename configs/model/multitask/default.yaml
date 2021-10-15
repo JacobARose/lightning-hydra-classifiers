@@ -1,0 +1,9 @@
+
+task_0:
+    in_features: null
+    num_classes: null
+    
+    
+task_1:
+    in_features: null
+    num_classes: null

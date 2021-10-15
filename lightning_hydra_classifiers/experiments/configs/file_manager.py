@@ -14,8 +14,8 @@ Created: Wednesday Sept 15th, 2021
 from pathlib import Path
 import os
 from typing import *
-from dataclasses import dataclass, field
-
+from dataclasses import dataclass, field, asdict
+from rich import print as pp
 # from lightning_hydra_classifiers.experiments.configs.model import *
 # from lightning_hydra_classifiers.experiments.configs.trainer import *
 # from lightning_hydra_classifiers.experiments.configs.data import *
@@ -26,7 +26,7 @@ from hydra.core.config_store import ConfigStore
 from omegaconf import MISSING
 from lightning_hydra_classifiers.experiments.configs.utils import hash_utils
 
-from .base import BaseConfig
+from lightning_hydra_classifiers.experiments.configs.base import BaseConfig
 
 __all__ =  ["SystemConfig", "TaskFileSystemConfig", "MultiTaskFileSystemConfig"]
 
@@ -108,6 +108,9 @@ class TaskFileSystemConfig(SystemConfig):
         super().__post_init__()
         self.model_ckpt_dir = str(Path(self.run_dir(stage=self.task_id),
                                        "checkpoints"))
+        self.model_ckpt_path = str(Path(self.model_ckpt_dir,
+                                       "model.ckpt"))
+        
         self.lr_tuner_dir = str(Path(self.run_dir(stage=self.task_id),
                                      "lr_tuner"))
         self.lr_tuner_results_path = str(Path(self.lr_tuner_dir, "results.csv"))
@@ -144,6 +147,14 @@ class MultiTaskFileSystemConfig(SystemConfig): #(TaskFileSystemConfig):
     @property
     def name_prefix(self) -> str:
         return "tasks"
+    
+    
+    
+if __name__ == "__main__":
+    
+    
+    print(f"MultiTaskFileSystemConfig -- default configuration:")
+    pp(asdict(MultiTaskFileSystemConfig(replicate=1, experiment_name="default", root_dir='.')))
 
 #     @property
 #     def name_prefix(self) -> str:

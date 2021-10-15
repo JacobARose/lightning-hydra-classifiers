@@ -1,0 +1,12 @@
+
+
+
+defaults:
+    - backbone: default # resnet50
+    - optimizer: AdamW
+    - multitask: default
+    
+
+backbone_name: "${model.backbone.backbone_name}"
+num_classes: null
+ckpt_path: null

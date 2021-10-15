@@ -1,0 +1,19 @@
+
+
+defaults:
+    - base_data
+
+dataset_name: "Extant-PNAS_to_PNAS"
+experiment:
+    experiment_name: "Extant-to-PNAS-512-transfer_benchmark"
+    task_0:
+        name: "Extant_Leaves_family_10_512_minus_PNAS_family_100_512"
+        val_split: 0.2
+        test_split: null
+    task_1:
+        name: "PNAS_family_100_512_minus_Extant_Leaves_family_10_512"
+        val_split: 0.2
+        test_split: null
+
+
+

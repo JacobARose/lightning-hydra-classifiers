@@ -1,0 +1,157 @@
+# @package _global_
+
+defaults: 
+
+    - trainer: ddp_trainer.yaml
+    - model: transfer_learning_model.yaml
+    - datamodule: standalone_datamodule.yaml #default_datamodule.yaml
+    - dataset: fossil_dataset.yaml
+#     - datamodule: fossil_datamodule.yaml # extant_datamodule.yaml # 
+    - callbacks: finetune_callbacks.yaml
+    # wandb_callbacks.yaml # default_callbacks.yaml  # set this to null if you don't want to use callbacks
+    - logger: many_loggers.yaml
+    #     - wandb: init.yaml
+#     - artifacts: null
+    - tuner: null
+#     - experiment: multi-gpu_experiment.yaml
+#     - hparams_search: null
+
+# enable color logging
+    - override hydra/hydra_logging: colorlog
+    - override hydra/job_logging: colorlog
+
+job_type: "${hparams.dataset}_train-test"
+root_dir: ${oc.env:WANDB_CACHE_DIR}
+work_dir: "/media/data_cifs/projects/prj_fossils/users/jacob/experiments/July2021-Nov2021"
+
+job_dir: "${work_dir}/${job_type}"
+log_dir: "${job_dir}/7-15" # ${now:%Y-%m-%d}/${now:%H-%M}"
+results_dir: '${model.model_dir}/results'
+
+# python "/media/data/jacob/GitHub/lightning-hydra-classifiers/configs/multi-gpu.yaml"
+
+optimized_metric: 'val/loss'
+test_only: false
+#true
+
+seed: 95893
+debug: false
+print_config: true
+disable_warnings: true
+
+model:
+    model_dir: '${log_dir}/model'
+    
+
+
+
+
+
+
+
+
+
+
+
+hparams_log_path: '${job_dir}/hparams/best_hparams.yaml'
+hparams:
+    batch_size: 128 # 256 # 8 #'default' #null
+    lr: 2e-03 #'default' #null # base learning rate
+    num_classes: null
+    classes: null
+    class_type: "family"
+    image_size: 512 #1024
+    dataset: '${dataset.config.name}' # "Fossil" # '${dataset.config.name}'  # "Extant"
+    backbone: "resnet50"
+    pretrained: true
+    unfreeze_init: null
+    finetune_milestones: [3, 5, 10]
+    unfreeze_curriculum: ['layer4', 'layer3', 'layer2']
+
+
+
+# datamodule:
+#     config:
+#         batch_size: '${hparams.batch_size}'
+#         image_size: '${hparams.image_size}'
+#         class_type: '${hparams.class_type}'
+#         seed: '${seed}'
+
+wandb:
+    init:
+        entity: '${oc.env:WANDB_ENTITY}' # "jrose"
+        project: "image_classification"
+        job_type: "train_supervised"
+        group: "train"
+        run_dir: ${root_dir}
+        tags: ['${hparams.dataset}','${hparams.backbone}',"train","supervised","init"]
+        reinit: true
+#         id: '${job_type}_${now:%Y-%m-%d-%H-%M}'
+#         config:
+#             stage: "train"
+#             stage_idx: "2"
+#             results_file: 'stage_idx_${.stage_idx}/train_results.csv'
+#             results_path: '${results_dir}/${.results_file}'
+
+
+
+logger:
+    wandb:
+        _target_: pytorch_lightning.loggers.wandb.WandbLogger
+#         entity: '${oc.env:WANDB_ENTITY}' # "jrose"
+#         project: "mnist_scaling_experiments"
+#         job_type: '${job_type}'
+#         group: "2-gpu"
+#         mode: "online" # "offline" # "disabled"
+#         allow_val_change: true
+#         sync_tensorboard: true
+#         id: 
+#         resume: 
+
+    csv:
+        _target_: pytorch_lightning.loggers.csv_logs.CSVLogger
+        save_dir: '${log_dir}/logs'
+        name: "csv/"
+
+    tensorboard:
+        _target_: pytorch_lightning.loggers.tensorboard.TensorBoardLogger
+        save_dir: "${log_dir}/logs/tensorboard/"
+        name: '${hparams.backbone}'
+
+callbacks:
+
+    early_stopping:
+        _target_: pytorch_lightning.callbacks.early_stopping.EarlyStopping
+#         code_dir: ${root_dir}
+        monitor: '${optimized_metric}'
+        patience: 5
+        verbose: false
+        mode: "min"
+
+
+
+
+# equivalent to running `python run.py trainer.fast_dev_run=true`
+# (this is placed here just for easier access from command line)
+
+
+
+
+
+
+hydra:
+    # output paths for hydra logs
+#     run:
+#         dir: logs/runs/${now:%Y-%m-%d}/${now:%H-%M-%S}
+#     sweep:
+# #         dir: logs/multiruns/${now:%Y-%m-%d_%H-%M-%S}
+#         subdir: ${hydra.job.num}
+
+    job:
+        # you can set here environment variables that are universal for all users
+        # for system specific variables (like data paths) it's better to use .env file!
+        env_set:
+            # currently there are some issues with running sweeps alongside wandb
+            # https://github.com/wandb/client/issues/1314
+            # this env var fixes that
+            WANDB_START_METHOD: thread
