@@ -66,6 +66,8 @@ class ClassifierHead(BaseModule):
         self.num_classes = num_classes
         self.classes = []
         super().__init__()
+        
+#         import pdb;pdb.set_trace()
         self.head = self.build_head(in_features=self.in_features,
                                     num_classes=self.num_classes)
 

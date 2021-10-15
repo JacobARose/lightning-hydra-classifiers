@@ -20,6 +20,7 @@ Created: Monday June 21st, 2021
 import torch
 import torch.nn as nn
 from torchvision import models
+from collections import OrderedDict
 from torchvision.models.utils import load_state_dict_from_url
 from torchvision.models.resnet import BasicBlock, Bottleneck, model_urls
 import copy
@@ -265,8 +266,16 @@ class CustomResNet(BaseModule):
         self.pretrained = pretrained
             
             
-        self.backbone = BackboneModelFactory(pretrained=self.pretrained, progress=progress)
-        self.out_features = self.backbone.out_features
+#         self.backbone = BackboneModelFactory(pretrained=self.pretrained, progress=progress)
+
+        backbone = BackboneModelFactory(model_name=self.model_name,
+                                               pretrained=self.pretrained,
+                                               progress=progress,
+                                               drop_rate=self.drop_rate)
+                         
+        self.backbone = nn.Sequential(OrderedDict(backbone.named_children()))
+        self.out_features = backbone.out_features
+
 #         self.global_pool = GlobalPoolFactory(output_size=self.backbone.out_features)
 #         self.classifier = ClassifierHead(in_features=self.out_features,
 #                                          num_classes=self.num_classes)

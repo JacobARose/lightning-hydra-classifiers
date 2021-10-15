@@ -8,7 +8,7 @@ Created: Thursday Junee 11th, 2021
 
 
 
-
+from collections import OrderedDict
 import timm
 from timm import models
 from torch import nn
@@ -141,11 +141,18 @@ class CustomEfficientNet(BaseModule):
         self.pretrained = pretrained
         self.drop_rate = drop_rate
             
-        self.backbone = BackboneModelFactory(model_name=self.model_name,
-                                             pretrained=self.pretrained,
-#                                              progress=progress,
-                                             drop_rate=self.drop_rate)
-        self.out_features = self.backbone.out_features
+#         self.backbone = BackboneModelFactory(model_name=self.model_name,
+#                                              pretrained=self.pretrained,
+# #                                              progress=progress,
+#                                              drop_rate=self.drop_rate)
+        backbone = BackboneModelFactory(model_name=self.model_name,
+                                               pretrained=self.pretrained,
+                                               progress=progress,
+                                               drop_rate=self.drop_rate)
+                         
+        self.backbone = nn.Sequential(OrderedDict(backbone.named_children()))
+
+        self.out_features = backbone.out_features
 #         self.global_pool = GlobalPoolFactory(output_size=1)#self.out_features)
 #         self.classifier = ClassifierHead(in_features=self.out_features,
 #                                          num_classes=self.num_classes)
