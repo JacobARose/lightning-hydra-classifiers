@@ -14,7 +14,7 @@ kwargs:
 early_stopping:
     _target_: pytorch_lightning.callbacks.early_stopping.EarlyStopping
     monitor: '${..kwargs.monitor.metric}'
-    patience: 7
+    patience: 8
     verbose: true
     mode: '${..kwargs.monitor.mode}'
     min_delta: 0.05
@@ -30,3 +30,4 @@ model_checkpoint:
     verbose: true
     dirpath: '${checkpoint_dir}'
     filename: '{epoch:02d}-{val_loss:.3f}-{val_acc:.3f}'
+    save_weights_only: true

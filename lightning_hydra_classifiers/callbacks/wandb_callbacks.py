@@ -13,41 +13,47 @@ from torch.utils.data import DataLoader #,Dataset, Subset, random_split
 from pytorch_lightning import Callback, Trainer, LightningDataModule
 from pytorch_lightning.loggers import LoggerCollection, WandbLogger
 from sklearn import metrics
-from sklearn.metrics import f1_score, precision_score, recall_score
-
+from sklearn.metrics import f1_score, precision_score, recall_score, confusion_matrix
 
 from pathlib import Path
-
-    
-from sklearn.metrics import confusion_matrix
+# from sklearn.metrics import confusion_matrix
 import plotly.graph_objs as go
 from plotly.subplots import make_subplots
 
+import matplotlib.pyplot as plt
+from sklearn.metrics import classification_report
+
+
+# from sklearn.metrics import accuracy_score
+# from sklearn.metrics import confusion_matrix
+# from sklearn.metrics import f1_score
 
 
 
+# def get_labels_from_filepath(path: str, fix_catalog_number: bool = False):
+#     return None
 
-def get_labels_from_filepath(path: str, fix_catalog_number: bool = False) -> Dict[str,str]:
-    """
-    Splits a precisely-formatted filename with the expectation that it is constructed with the following fields separated by '_':
-    1. family
-    2. genus
-    3. species
-    4. collection
-    5. catalog_number
+# def get_labels_from_filepath(path: str, fix_catalog_number: bool = False) -> Dict[str,str]:
+#     """
+#     Splits a precisely-formatted filename with the expectation that it is constructed with the following fields separated by '_':
+#     1. family
+#     2. genus
+#     3. species
+#     4. collection
+#     5. catalog_number
     
-    If fix_catalog_number is True, assume that the collection is not included and must separately be extracted from the first part of the catalog number.
+#     If fix_catalog_number is True, assume that the collection is not included and must separately be extracted from the first part of the catalog number.
     
-    """
-    family, genus, species, collection, catalog_number = Path(path).stem.split("_", maxsplit=4)
-    if fix_catalog_number:
-        catalog_number = '_'.join([collection, catalog_number])
-    return {"family":family,
-            "genus":genus,
-            "species":species,
-            "collection":collection,
-            "catalog_number":catalog_number}
-
+#     """
+#     family, genus, species, collection, catalog_number = Path(path).stem.split("_", maxsplit=4)
+#     if fix_catalog_number:
+#         catalog_number = '_'.join([collection, catalog_number])
+#     return {"family":family,
+#             "genus":genus,
+#             "species":species,
+#             "collection":collection,
+#             "catalog_number":catalog_number}
+from lightning_hydra_classifiers.utils.plot_utils import plot_confusion_matrix
 
 
 
@@ -235,6 +241,8 @@ class LogPerClassMetricsToWandb(Callback):
         self.class_names = class_names
         self.preds = []
         self.targets = []
+        self.path = []
+        self.catalog_number = []
         self.ready = True
         
         self.annotation_class_name_max_len = 125
@@ -257,7 +265,8 @@ class LogPerClassMetricsToWandb(Callback):
         elif 'hidden' in outputs.keys():
             outputs = outputs['hidden']
         if self.ready:
-            
+            self.path.extend(getattr(batch, "path", []))
+            self.catalog_number.extend(getattr(batch, "catalog_number", []))
             self.preds.append(outputs["y_pred"].detach().cpu())
             self.targets.append(outputs["y_true"].detach().cpu())
 
@@ -286,7 +295,8 @@ class LogPerClassMetricsToWandb(Callback):
 #             print(f"preds.shape={preds.shape}")
 #             print(f"targets.shape={targets.shape}")
             
-            self._log_per_class_scores(preds, targets, logger=wandb_logger)
+            self._log_classification_report(preds, targets, logger=wandb_logger)
+#             self._log_per_class_scores(preds, targets, logger=wandb_logger)
             self._log_confusion_matrix(preds, targets, logger=wandb_logger)
             wandb_logger.experiment.log({f"epoch": trainer.current_epoch})
             
@@ -295,6 +305,40 @@ class LogPerClassMetricsToWandb(Callback):
             self.targets.clear()
             self.preds = []
             self.targets = []
+            self.path = []
+            self.catalog_number = []
+            
+            
+    def _log_classification_report(self, preds: np.ndarray, targets: np.ndarray, logger):
+        
+
+#         true = np.random.randint(0, num_classes, size=num_samples)
+#         pred = np.random.randint(0, num_classes, size=num_samples)
+#         labels = np.arange(num_classes)
+#         target_names = [r.get_random_word() for _ in range(num_classes)]
+        # target_names = list("ABCDEFGHI")
+
+        clf_report = classification_report(targets,
+                                           preds,
+                                           zero_division=0,
+                                           output_dict=True)
+        
+
+        sns.set_theme(context="talk")
+        
+        fig, ax = plt.subplots(1,2, figsize=(18,30))
+
+        sns.heatmap(pd.DataFrame(clf_report).iloc[:-1, :].T, annot=True, annot_kws={"fontsize":6}, ax=ax[0])
+        sns.heatmap(pd.DataFrame(clf_report).iloc[-1:, :-3].T, annot=True, annot_kws={"fontsize":6}, ax=ax[1])
+
+#         fig = plt.figure(figsize=(15,29))
+#         sns.heatmap(pd.DataFrame(clf_report).iloc[:, :].T, annot=True, annot_kws={"fontsize":7})
+        logger.experiment.log({f"val/classification_report": wandb.Image(plt)}, commit=False)
+#         logger.experiment.log({f"val/classification_report": wandb.Image(fig)}, commit=False)
+        plt.clf()
+        plt.close(fig)
+            
+            
             
     def _log_per_class_scores(self, preds: np.ndarray, targets: np.ndarray, logger):
         """
@@ -306,15 +350,15 @@ class LogPerClassMetricsToWandb(Callback):
         sns.set_context(context=sns_context, font_scale=0.7)
         plt.style.use(sns_style)
 
-        f1 = f1_score(preds, targets, average=None)
-        r = recall_score(preds, targets, average=None)
-        p = precision_score(preds, targets, average=None)
+        f1 = f1_score(preds, targets, average=None, zero_division=0)
+        r = recall_score(preds, targets, average=None, zero_division=0)
+        p = precision_score(preds, targets, average=None, zero_division=0)
 
         
         class_indices, support = np.unique(targets, return_counts=True)
         
         num_classes = len(self.class_names)
-        print(f1.shape, r.shape, p.shape, support.shape)
+#         print(f1.shape, r.shape, p.shape, support.shape)
         
         if len(support) < num_classes:
             f1_full = np.zeros(num_classes)
@@ -348,7 +392,7 @@ class LogPerClassMetricsToWandb(Callback):
         xticklabels = self.class_names if annot else []
         yticklabels=["F1", "Precision", "Recall", "Support"]
 
-        g = sns.heatmap(data,
+        g = sns.heatmap(data.T,
                         annot=annot,
                         vmin=0.0, vmax=1.0,
                         linewidths=1, annot_kws={"size": 8}, fmt=".2f", cmap=cmap,
@@ -358,9 +402,14 @@ class LogPerClassMetricsToWandb(Callback):
         g.set_xticklabels(g.get_xticklabels(), rotation=45, horizontalalignment='right', fontsize='medium', fontweight='light')
         g.set_yticklabels(g.get_yticklabels(), rotation=45, horizontalalignment='right', fontsize='medium', fontweight='light')
         plt.subplots_adjust(bottom=0.2, top=0.95, wspace=None, hspace=0.07)
-        
-        logger.experiment.log({f"val/per_class/f1_p_r_heatmap": wandb.Image(plt)}, commit=False)
+        try:
+            logger.experiment.log({f"val/per_class/f1_p_r_heatmap": wandb.Image(plt.gcf())}, commit=False)
+        except Exception as e:
+            print(e)
+            logger.experiment.log({f"val/per_class/f1_p_r_heatmap": wandb.Image(plt)}, commit=False)
+            print('retry successful')
         plt.clf()
+        plt.close(fig)
         
 #         import pdb; pdb.set_trace()
         
@@ -372,7 +421,7 @@ class LogPerClassMetricsToWandb(Callback):
         for j, metric in enumerate(["F1", "Precision", "Recall"]):
 #             print(f"metric={metric},", f"len(data[j])={len(data[j])}")
             metric_data = pd.DataFrame(data[j]).T.to_records()
-            print(f"val/per_class/{metric}_distributions: metric_data[0].shape={metric_data.shape}")
+#             print(f"val/per_class/{metric}_distributions: metric_data[0].shape={metric_data.shape}")
             logger.experiment.log({f"val/per_class/{metric}_distributions" : wandb.plot.line_series(xs=idx,
                                                                                                   ys=metric_data,
                                                                                                   keys=self.class_names,
@@ -398,30 +447,39 @@ class LogPerClassMetricsToWandb(Callback):
         confusion_matrix.index.name = "Predicted"
         confusion_matrix = confusion_matrix.T
         
-        h = int(len(self.class_names)//10)
-        w = h + 10
-        plt.figure(figsize=(w, h))
+#         h = int(len(self.class_names)//10)
+#         w = h + 10
+#         plt.figure(figsize=(w, h))
         
-        annot = bool(confusion_matrix.shape[0] < 75)
-        xticklabels = self.class_names if annot else []
-        print(f'len(self.class_names)={len(self.class_names)}')
-        g = sns.heatmap(confusion_matrix, 
-                        annot=annot,
-                        linewidths=1,
-                        annot_kws={"size": 8},
-                        fmt="g",
-                        cmap=cmap,
-                        yticklabels=xticklabels,
-                        xticklabels=xticklabels # [self.class_names[int(i)] for i in class_indices]
-                        )
+#         annot = bool(confusion_matrix.shape[0] < 75)
+#         xticklabels = self.class_names if annot else []
+#         print(f'len(self.class_names)={len(self.class_names)}')
+#         g = sns.heatmap(confusion_matrix, 
+#                         annot=annot,
+#                         linewidths=1,
+#                         annot_kws={"size": 8},
+#                         cbar_kws={"shrink":0.9},
+#                         fmt="g",
+#                         cmap=cmap,
+#                         yticklabels=xticklabels,
+#                         xticklabels=xticklabels # [self.class_names[int(i)] for i in class_indices]
+#                         )
         
-        g.set_xticklabels(g.get_xticklabels(), rotation=45, horizontalalignment='right', fontsize='small', fontweight='light')
-        g.set_yticklabels(g.get_yticklabels(), rotation=45, horizontalalignment='right', fontsize='small', fontweight='light')
-        plt.subplots_adjust(bottom=0.2, top=0.95, wspace=None, hspace=0.07)
+#         g.set_xticklabels(g.get_xticklabels(), rotation=45, horizontalalignment='right', fontsize='small', fontweight='light')
+#         g.set_yticklabels(g.get_yticklabels(), rotation=45, horizontalalignment='right', fontsize='small', fontweight='light')
+#         plt.subplots_adjust(bottom=0.2, top=0.95, wspace=None, hspace=0.07)
+        try:
+            plot_confusion_matrix(cm=confusion_matrix, title=None)
+            print(f"val/confusion_matrix/{logger.experiment.name}")
+            logger.experiment.log({f"val/confusion_matrix/{logger.experiment.name}": wandb.Image(plt)}, commit=False)
+#             logger.experiment.log({f"val/confusion_matrix_png/{logger.experiment.name}": wandb.Image()}, commit=False)
 
-        print(f"val/confusion_matrix/{logger.experiment.name}")
-        logger.experiment.log({f"val/confusion_matrix/{logger.experiment.name}": wandb.Image(plt)}, commit=False)
+        except Exception as e:
+            print(e)
+            print('continuing anyway')
+
         plt.clf()
+        plt.close(plt.gcf())
 
         
         

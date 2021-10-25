@@ -18,7 +18,7 @@ import torch
 from pathlib import Path
 import os
 from typing import *
-
+import pytorch_lightning as pl
 # from pytorch_lightning.utilities.distributed import rank_zero_only
 from lightning_hydra_classifiers.utils.template_utils import get_logger
 logger = get_logger(name=__name__)
@@ -211,6 +211,7 @@ class ImageStatsAccumulatorCallback(pl.Callback):
     def on_train_batch_start(self, trainer, pl_module, batch, batch_idx, dataloader_idx):
         if (batch_idx + 1) % trainer.log_every_n_steps == 0:
             x, y = batch[:1]
+            #TBD: Add logic for multiple loggers
             logger = trainer.logger
             logger.experiment.add_histogram("input", x, global_step=trainer.global_step)
             logger.experiment.add_histogram("target", y, global_step=trainer.global_step)

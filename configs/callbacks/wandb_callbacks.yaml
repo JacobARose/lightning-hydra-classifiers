@@ -19,6 +19,14 @@ watch_model_with_wandb:
     log: "gradients"
     log_freq: 100
 
+finetuning_lightning_callback:
+    _target_: lightning_hydra_classifiers.callbacks.finetuning_callbacks.FinetuningLightningCallback
+    monitor: "val_acc"
+    mode: "max"
+    patience: 1
+
+
+
 # log_f1_prec_rec_heat_map:
 #     _target_: lightning_hydra_classifiers.utils.callback_utils.LogF1PrecRecHeatmap
 
