@@ -1,3 +1,9 @@
+"""
+Basic train.py script
+
+
+"""
+
 from typing import List, Optional
 
 from pytorch_lightning import LightningModule, LightningDataModule, Callback, Trainer

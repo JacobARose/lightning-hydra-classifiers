@@ -3,648 +3,702 @@
 lightning_hydra_classifiers/models/transfer.py
 
 Author: Jacob A Rose
-Created: Wednesday June 23rd, 2021
+Created: Thursday Oct 14th, 2021
+
+Plugins:
+    LayerSelectPlugin
+    LayerFreezeLightningPlugin
+    LightningMetricsPlugin
+Super classes:
+    BaseLightningModule
+Usable classes:
+    LightningClassifier
 
 
-
-
-Based on the pytorch lightning script located at the following:
-source: https://github.com/PyTorchLightning/pytorch-lightning/blob/master/pl_examples/domain_templates/computer_vision_fine_tuning.py
-
-
-
-Computer vision example on Transfer Learning.
-
-This computer vision example illustrates how one could fine-tune a pre-trained
-network (by default, a ResNet50 is used) using pytorch-lightning. For the sake
-of this example, the 'cats and dogs dataset' (~60MB, see `DATA_URL` below) and
-the proposed network (denoted by `TransferLearningModel`, see below) is
-trained for 15 epochs.
-The training consists of three stages.
-
-1. From epoch 0 to 4, the feature extractor (the pre-trained network) is frozen except
-maybe for the BatchNorm layers (depending on whether `train_bn = True`). The BatchNorm
-layers (if `train_bn = True`) and the parameters of the classifier are trained as a
-single parameters group with lr = 1e-2.
-
-2. From epoch 5 to 9, the last two layer groups of the pre-trained network are unfrozen
-and added to the optimizer as a new parameter group with lr = 1e-4 (while lr = 1e-3
-for the first parameter group in the optimizer).
-
-3. Eventually, from epoch 10, all the remaining layer groups of the pre-trained network
-are unfrozen and added to the optimizer as a third parameter group. From epoch 10,
-the parameters of the pre-trained network are trained with lr = 1e-5 while those of
-the classifier is trained with lr = 1e-4.
-Note:
-    See: https://pytorch.org/tutorials/beginner/transfer_learning_tutorial.html
+--------------------------------------------------------------------------------------------------------------
+--------------------------------------------------------------------------------------------------------------
+The previous script with this name (from Wednesday June 23rd, 2021) has been deprecated, and might be found in:
+lightning_hydra_classifiers/models/_DEPRECATED/transfer.py
+----------------------------------------------------------
 """
 
 import logging
 import os
-from pathlib import Path
-from typing import Union, Callable, Tuple, Optional, Dict, Any, List
-
+# from pathlib import Path
+# import pytorch_lightning as pl
+from rich import print as pp
+import pandas as pd
+# import torch
+# import torch.nn as nn
+# import torch.nn.functional as F
+# import torch.optim as optim
+# from torch.optim import lr_scheduler
+# from torch.utils.data import DataLoader
+import numpy as np
+# import torchvision
+# from torchvision import datasets, models, transforms as t
+# from fastprogress.fastprogress import master_bar, progress_bar
+# import matplotlib.pyplot as plt
+# source: https://github.com/hirune924/lightning-hydra/blob/master/layer/layer.py
 import torch
-import torch.nn.functional as F
-from torch import nn, optim
-from torch.optim.lr_scheduler import MultiStepLR
-from torch.optim.optimizer import Optimizer
-from torch.utils.data import DataLoader
-from torchmetrics import Accuracy
-from torchvision import models, transforms
-from torchvision.datasets import ImageFolder
-# from torchvision.datasets.utils import download_and_extract_archive
-
+import torch.nn as nn
 import pytorch_lightning as pl
-from pl_examples import cli_lightning_logo
-from pytorch_lightning import LightningDataModule
-from pytorch_lightning.callbacks.finetuning import BaseFinetuning
-from pytorch_lightning.utilities import rank_zero_info
-from pytorch_lightning import seed_everything
-from pytorch_lightning.utilities.cli import LightningCLI
+# from typing import Optional
+import timm
+import glob
+import hydra
+from collections import OrderedDict
+from typing import *
+
+from lightning_hydra_classifiers.utils.model_utils import count_parameters, collect_results
+from lightning_hydra_classifiers.utils.metric_utils import get_per_class_metrics, get_scalar_metrics
+from lightning_hydra_classifiers.models.backbones.backbone import build_model
+
+logger = logging.Logger(__name__)
+logger.setLevel('INFO')
+
+from tqdm.auto import tqdm, trange
+from prettytable import PrettyTable
 
 
-from lightning_hydra_classifiers.models import heads, base
-from lightning_hydra_classifiers.models.base import BaseLightningModule
 
-from lightning_hydra_classifiers.models.heads.classifier import ClassifierHead
+__all__ = ["BaseLightningModule", "LightningClassifier"]
 
 
-log = logging.getLogger(__name__)
-# DATA_URL = "https://storage.googleapis.com/mledu-datasets/cats_and_dogs_filtered.zip"
+BN_TYPE = (torch.nn.modules.batchnorm._BatchNorm,)
 
-#  --- Finetuning Callback ---
+def is_bn(layer: nn.Module) -> bool:
+    """ Return True if layer's type is one of the batch norms."""
+    return isinstance(layer, BN_TYPE)
+
+def grad_check(tensor: torch.Tensor) -> bool:
+    """ Returns True if tensor.requires_grad==True, else False."""
+    return tensor.requires_grad == True
 
 
-class MilestonesFinetuning(BaseFinetuning):
+
+class LayerSelectPlugin:
+    """
+    LayerSelectPlugin
+
+    To be subclassed by main Pytorch Lightning Module
     
+    Available methods:
+    * classmethods:
+        - count_parameters
+    * instance methods:
+        - get_batchnorm_modules
+        - get_conv_modules
+        - get_linear_modules
+        - get_named_parameters
+        - get_named_modules
+        - get_trainable_parameters
+        - get_nontrainable_parameters
+        - count_trainable_batchnorm_layers
+
+    
+    
+    """
+    
+    # TODO: Switch to using get_modules_by_type instead of get_named_modules
+    @classmethod
+    def get_batchnorm_modules(cls,
+                              model: Optional=None):
+#         model = model or self
+#         return self.get_named_modules("bn", model=model)
+        return cls.get_modules_by_type(include_type=BN_TYPE,
+                                        model=model)
+    
+    def get_conv_modules(self,
+                         model: Optional=None):
+        model = model or self
+        return self.get_named_modules("conv", model=model)
+    
+    def get_linear_modules(self,
+                           model: Optional=None):
+        model = model or self
+        return ((n,m) for n,m in self.named_modules(model=model) if isinstance(m, nn.modules.Linear))
+    
+    
+    def get_named_parameters(self,
+                             filter_pattern: Optional[str]=None,
+                             model: Optional=None,
+                             trainable: bool=False,
+                             nontrainable: bool=False):
+        
+#         if isinstance(model, (Sequence,Generator)):
+#             named_params = ()
+        model = model or self
+        named_params = model.named_parameters()
+        if isinstance(filter_pattern, str):
+            named_params = ((n,p) for n,p in named_params if filter_pattern in n)
+        if trainable and nontrainable:
+            logger.warning('Returning all parameters regardless of the values of requires_grad.')
+            return named_params
+        if trainable:
+            return ((n, p) for n, p in named_params if p.requires_grad)
+        if nontrainable:
+            return ((n, p) for n, p in named_params if not p.requires_grad)
+        return named_params
+    
+    ## TODO: Create a filter_modules() helper method that takes a filter function to be re-used in each of the various get_modules_by* methods.
+
+    def get_named_modules(self,
+                          filter_pattern: Optional[str]=None,
+                          model: Optional=None):
+        model = model or self
+        if isinstance(filter_pattern, str):
+            return ((n,l) for n,l in model.named_modules() if filter_pattern in n)
+        return model.named_modules()
+    
+    @classmethod
+    def get_modules_by_type(cls,
+                            include_type: Any=None,
+                            model: Optional=None):
+#         model = model or self
+        if include_type is not None:
+            return ((n,l) for n,l in model.named_modules() if isinstance(l, include_type))
+        return model.named_modules()
+    
+    
+            
+    def get_trainable_parameters(self, 
+                                 model: Optional=None,
+                                 count_params: bool=False,
+                                 count_layers: bool=False):
+        model = model or self
+        out = (p for _, p in self.get_named_parameters(model=model,
+                                                       trainable=True))
+        if count_params:
+            out = sum((p.numel() for p in out))
+        elif count_layers:
+            out = len(list(out))
+        return out
+#         return (p for p in self.parameters() if p.requires_grad)
+
+    def get_nontrainable_parameters(self,
+                                    model: Optional=None,
+                                    count_params: bool=False,
+                                    count_layers: bool=False):
+        model = model or self
+        out = (p for _, p in self.get_named_parameters(model=model,
+                                                       nontrainable=True))
+        if count_params:
+            out = sum((p.numel() for p in out))
+        elif count_layers:
+            out = len(list(out))
+        return out
+#         return (p for p in self.parameters() if not p.requires_grad)
+
+    def count_trainable_batchnorm_layers(self,
+                                         model: Optional=None) -> Tuple[Dict[str, int]]:
+        model = model or self
+        is_training = np.array([m.training for _, m in self.get_batchnorm_modules(model=model)])
+        training = {"True":np.sum(is_training),
+                    "False":np.sum(~is_training),
+                    "Total": len(is_training)}
+#         print(f"trainable batchnorm modules:{}")
+#         print(f"nontrainable batchnorm modules:{np.sum(~is_training)}")
+
+
+        modules = list(tuple(p.parameters()) for n, p in self.get_batchnorm_modules(model=model))
+        is_training = np.array([(grad_check(m[0]) and grad_check(m[1])) for m in modules])
+
+#         is_training = np.array([p.requires_grad for _, p in self.get_named_parameters("bn", model=model)])
+        requires_grad = {"True":np.sum(is_training),
+                         "False":np.sum(~is_training),
+                         "Total": len(is_training)}
+        if getattr(self, "_verbose", False):
+            print("layer.training-> Use batch statistics")
+            print("layer.training-> Use running statistics")
+            print("is_training (layer.training==True):"); pp(training)
+            print("requires_grad (layer.requires_grad==True):"); pp(requires_grad)
+        
+        return training, requires_grad
+
+#         print(f"batchnorm params with requires_grad=True: :{np.sum(is_training)}")
+#         print(f"batchnorm params with requires_grad=False:{np.sum(~is_training)}")
+        
+    @classmethod
+    def count_parameters(cls, model, verbose: bool=True) -> PrettyTable:
+        return count_parameters(model, verbose=verbose)
+
+
+class LayerFreezeLightningPlugin:
+    """
+    LayerFreezeLightningPlugin
+    
+    To be subclassed by main Pytorch Lightning Module
+    
+    Available methods:
+    * classmethods:
+        - freeze_up_to
+        - freeze
+        - unfreeze
+        - freeze_bn
+        - set_bn_eval
+    * instance methods:
+        - freeze_backbone
+        - unfreeze_backbone_top_layers
+    """
+    valid_strategies : Tuple[str] = ("feature_extractor",
+                                     "feature_extractor_+_bn.eval()",
+                                     "feature_extractor_+_except_bn")
+    _verbose: bool = True
+    def set_strategy(self, strategy: str):
+        if strategy == "feature_extractor":
+            self.feature_extractor_strategy(freeze_bn=True,
+                                            eval_bn=False)
+        elif strategy == "feature_extractor_+_bn.eval()":
+            self.feature_extractor_strategy(freeze_bn=True,
+                                            eval_bn=True)
+        elif strategy == "feature_extractor_+_except_bn":
+            self.feature_extractor_strategy(freeze_bn=False,
+                                            eval_bn=False)
+        elif strategy == "finetuning_unfreeze_layers_on_plateau":
+            self.finetuning_milestones = ["layer4", "layer3", "layer2", "layer1"]            
+            self.feature_extractor_strategy(freeze_bn=False,
+                                            eval_bn=False)
+
+            
+        else:
+            raise NotImplementedError(f"{strategy} is not a valid finetuning_strategy. Please select from 1 of the following {len(self.valid_strategies)} strategies: {self.valid_strategies}")
+        self.hparams.finetuning_strategy = strategy
+        if self._verbose: print(f"Set current model training strategy to: {self.hparams.finetuning_strategy}")
+
+    
+    def feature_extractor_strategy(self,
+                                   freeze_bn: bool=True,
+                                   eval_bn: bool=False):
+        """
+        Defaults to PyTorch default, which is to freeze the gradients for batchnorm layers, but not necessarily apply eval() to them upon freezing, thus allowing the running mean & std to continue training on each incoming batch.
+        
+        Allows the option of both freezing and setting to eval mode all batch norm layers, thus fully removing the possibility of data leakage or accidental injection of noise.
+
+        Arguments:
+           freeze_bn: bool, default=True
+               If True, set bn layers' attribute requires_grad to False.
+           eval_bn: bool, default=False
+               If True, apply layer.eval() to bn layers. If False, apply layer.train() to bn layers.
+        
+        """
+        self.freeze_backbone(freeze_bn=freeze_bn)
+        self._freeze_bn = freeze_bn
+        self.eval_bn = eval_bn
+        
+        if not freeze_bn:
+            self.unfreeze_bn(self.model,
+                             unfreeze_bn=True)
+#             self.unfreeze(self.model,
+#                           filter_pattern="bn")
+        if self.eval_bn:
+            self.set_bn_eval(self.model)
+
+            
+#     def on_validation_model_eval(self) -> None:
+#         """
+#         Sets the model to eval during the val loop
+#         """
+#         self.eval()
+
+    def on_validation_model_train(self) -> None:
+        """
+        Sets the model to train during the val loop
+        """
+        self.train()
+        self.set_strategy(strategy=self.hparams.finetuning_strategy)
+
+    
+    
+    
+    @classmethod
+    def freeze(cls,
+               module,
+               freeze_bn: bool=True,
+               filter_pattern: Optional[str]=None):
+        modules = list(module.named_modules())
+        
+        for n, m in modules:
+#             if filter_pattern not in n:
+            if isinstance(filter_pattern, str) and (filter_pattern not in n):
+                continue
+#             m.eval()
+            for p_name, p in m.named_parameters():
+                if isinstance(filter_pattern, str) and (filter_pattern not in n):
+                    continue
+#                 if freeze_bn or not isinstance(m, nn.BatchNorm2d):
+                if freeze_bn or not is_bn(m):
+                    p.requires_grad=False
+            cls.freeze_bn(m, freeze_bn)      
+
+            
+    @classmethod
+    def unfreeze(cls,
+                 module,
+                 unfreeze_bn: bool=True,
+                 filter_pattern: Optional[str]=None):
+
+#         out = (p for _, p in cls.get_named_parameters(model=module))
+        
+        if isinstance(module, (Generator, Sequence)):
+            modules = module
+        else:
+            modules = list(module.named_modules())
+        for n, m in modules:
+            if isinstance(filter_pattern, str) and (filter_pattern not in n):
+                continue
+            if is_bn(m) and not unfreeze_bn:
+                continue
+            cls.unfreeze_bn(m, unfreeze_bn)
+            for p_name, p in m.named_parameters():
+                p.requires_grad=True
+            m.train()
+
+    @classmethod
+    def freeze_bn(cls, module: nn.Module, freeze_bn: bool=True):
+        for n, m in cls.get_batchnorm_modules(model=module):
+            if freeze_bn:
+                for p in m.parameters():
+                    p.requires_grad = False
+                    if cls._verbose: logger.debug(f"[freeze_bn][Layer={n}] Set requires_grad=False")
+
+    @classmethod
+    def unfreeze_bn(cls, module: nn.Module, unfreeze_bn: bool=True):
+        for n, m in cls.get_batchnorm_modules(model=module):
+            if unfreeze_bn:
+                for p in m.parameters():
+                    p.requires_grad = True
+                    if cls._verbose: logger.debug(f"[unfreeze_bn][Layer={n}] Set requires_grad=True")
+
+                    
+    @classmethod
+    def set_bn_eval(cls, module: nn.Module)->None:
+        "Set bn layers in eval mode for all recursive children of `m`."
+        for n, l in module.named_children():
+#             if isinstance(l, nn.BatchNorm2d) and not next(l.parameters()).requires_grad:
+            if is_bn(l) and not next(l.parameters()).requires_grad:
+                l.eval()
+                if cls._verbose: logger.debug(f"[set_bn_eval][Layer={n}] Called layer.eval()")
+
+#                 continue
+            cls.set_bn_eval(l)
+
+
+    def freeze_backbone(self, freeze_bn: bool=True):
+        
+        self.freeze(self.model.backbone,
+                    freeze_bn=freeze_bn)
+        self.unfreeze(self.model.head)
+
+        
+        
+    def unfreeze_backbone_top_layers(self,
+                                     unfreeze_down_to: Union[str,int]=-1):
+        if isinstance(unfreeze_down_to, str):
+            layers = list(reversed(list(self.model.backbone.named_children())))
+        if isinstance(unfreeze_down_to, int):
+            if unfreeze_down_to == 0:
+                print(f"Pass non-zero integer or str label name to unfreeze layers. Returning without change.")
+                return
+            layers = list(reversed(list(enumerate(self.model.backbone.children()))))
+            if unfreeze_down_to < 0:
+                unfreeze_down_to = len(layers) + unfreeze_down_to
+        
+        for layer_id, l in layers:
+            self.unfreeze(l)
+            if layer_id == unfreeze_down_to:
+                break
+            
+
+    
+    @classmethod
+    def freeze_up_to(cls, 
+                     module, 
+                     stop_layer: Union[int, str]=None,
+                     freeze_bn: bool=True):
+
+        cls.unfreeze(module, freeze_bn=freeze_bn)
+
+        if isinstance(stop_layer, str):
+            modules = list(module.named_modules())
+        elif isinstance(stop_layer, int) or (stop_layer is None):
+            modules = list(enumerate(module.modules()))
+
+        for module_id, m in modules:
+            if stop_layer == module_id:
+                logger.warning(f"Stopping at layer: {n}")
+                break
+            cls.freeze(m, freeze_bn=freeze_bn)
+#             for param_id, param in m.named_parameters():
+#                 param.requires_grad = False
+#             m.eval()
+#             cls.freeze_bn(m, freeze_bn)
+            logger.warning(f"Layer {module_id}: type={type(m)}|training={m.training}")
+            logger.warning(f"requires_grad={np.all([p.requires_grad for p in m.parameters()])}")
+
+
+
+class LightningMetricsPlugin:
+    """
+    LightningMetricsPlugin
+    
+    To be subclassed by main Pytorch Lightning Module
+    
+    Available methods:
+    * instance methods:
+        - log_metric_step
+        - init_metrics
+    """
+    
+    
+    def log_metric_step(self,
+                        stage: str='train',
+                        omit_metric_types: Optional[List[str]]=None,
+                        omit_metric_keys: Optional[List[str]]=None):
+        omit_metric_types = omit_metric_types or []
+        omit_metric_keys = omit_metric_keys or []
+        
+        for metric_type, metric_collection in self.all_metrics[stage].items():
+            if metric_type in omit_metric_types:
+                continue
+            if metric_type == "scalar":
+                self.log_dict({k:v for k,v in metric_collection.items() if k not in omit_metric_keys},
+                               on_step=False, on_epoch=True, prog_bar=True, logger=True)
+
+            elif metric_type == "per_class":
+                for k,v in metric_collection.items():
+                    if k in omit_metric_keys:
+                        continue
+                    results = v.compute()
+                    for class_idx, result in enumerate(results): #range(len(results)):
+                        self.log(f"{k}_class_{class_idx}", result,
+                                 on_step=False, on_epoch=True, prog_bar=False, logger=True)
+            else:
+                logger.warning(f"[Warning] {metric_type} requires specialized handling in lightningmodule.log_metric_step().")
+
+    def init_metrics(self,
+                     stage: str='train',
+                     tag: Optional[str]=None):
+        tag = tag or ""
+        if not hasattr(self, "all_metrics"):
+            self.all_metrics = {}
+        
+        if not hasattr(self,"num_classes") and hasattr(self.hparams, "num_classes"):
+            self.num_classes = self.hparams.num_classes
+        
+        print(f"self.num_classes={self.num_classes}")
+        if stage in ['train', 'all']:
+            prefix=f'{tag}_train'.strip("_")
+            self.metrics_train = get_scalar_metrics(num_classes=self.num_classes, average='macro', prefix=prefix)
+            self.metrics_train_per_class = get_per_class_metrics(num_classes=self.num_classes, prefix='train')
+            self.all_metrics['train'] = {"scalar":self.metrics_train,
+                                         "per_class":self.metrics_train_per_class}
+            
+        if stage in ['val', 'all']:
+            prefix=f'{tag}_val'.strip("_")
+            self.metrics_val = get_scalar_metrics(num_classes=self.num_classes, average='macro', prefix=prefix)
+            self.metrics_val_per_class = get_per_class_metrics(num_classes=self.num_classes, prefix='val')
+            self.all_metrics['val'] = {"scalar":self.metrics_val,
+                                       "per_class":self.metrics_val_per_class}
+            
+        if stage in ['test', 'all']:
+            prefix=f'{tag}_test'.strip("_")
+            self.metrics_test = get_scalar_metrics(num_classes=self.num_classes, average='macro', prefix=prefix)
+            self.metrics_test_per_class = get_per_class_metrics(num_classes=self.num_classes, prefix='test')
+            self.all_metrics['test'] = {"scalar":self.metrics_test,
+                                        "per_class":self.metrics_test_per_class}
+            
+            
+
+
+class BaseLightningModule(LightningMetricsPlugin,
+                          LayerFreezeLightningPlugin,
+                          LayerSelectPlugin,
+                          pl.LightningModule):
+    """
+    BaseLightningModule
+    
+    Additional methods made available through subclassed plugins.
+    
+        Available methods:
+    * instance methods:
+        - step
+        - update_metric_step
+        - training_step
+        - validation_step
+        - test_step
+    
+    Plugins:
+    
+        -- LightningMetricsPlugin
+            * instance methods:
+                - log_metric_step
+                - init_metrics
+        -- LayerFreezeLightningPlugin
+            * classmethods:
+                - freeze_up_to
+                - freeze
+                - unfreeze
+                - freeze_bn
+                - set_bn_eval
+            * instance methods:
+                - freeze_backbone
+                - unfreeze_backbone_top_layers        
+        -- LayerSelectPlugin
+            * classmethods:
+                - count_parameters
+            * instance methods:
+                - get_batchnorm_modules
+                - get_conv_modules
+                - get_linear_modules
+                - get_named_parameters
+                - get_named_modules
+                - get_trainable_parameters
+                - get_nontrainable_parameters
+                - count_trainable_batchnorm_layers
+        
+    
+    
+    """
+    
+    def __init__(self, seed: Optional[int]=None):
+        super().__init__()
+        self.seed = seed
+        pl.seed_everything(seed)
+
+    def step(self, batch, batch_idx):
+        image, y_true = batch[0], batch[1]
+        y_logit = self(image)
+        y_pred = torch.argmax(y_logit, dim=-1)
+        return y_logit, y_true, y_pred    
+    
+    def update_metric_step(self,
+                           y_logit,
+                           y_true,
+                           stage: str='train'):
+        out = {}
+        for metric_type, metric_collection in self.all_metrics[stage].items():
+            out[metric_type] = metric_collection(y_logit, y_true)
+        return out
+    
+    
+    def training_step(self, batch, batch_idx):
+        if self.eval_bn:
+            if self._verbose: logger.debug(f"[training_step] Calling self.set_bn_eval(self.model)")
+            self.set_bn_eval(self.model)
+            
+        y_logit, y_true, y_pred = self.step(batch, batch_idx)
+        loss = self.criterion(y_logit, y_true)
+        self.update_metric_step(y_logit,
+                                y_true,
+                                stage="train")
+        self.log_dict({"train_acc": self.metrics_train["train/acc_top1"],
+                       "train_loss": loss},
+                      on_step=True, on_epoch=True,
+                      prog_bar=True, logger=True)
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        y_logit, y_true, y_pred = self.step(batch, batch_idx)
+        loss = self.criterion(y_logit, y_true)
+        self.update_metric_step(y_logit,
+                                y_true,
+                                stage="val")
+        self.log_dict({"val_acc": self.metrics_val["val/acc_top1"],
+                       "val_loss": loss},
+                      on_step=True, on_epoch=True,
+                      prog_bar=True, logger=True)
+        
+
+        return {"loss":loss,
+                "y_logit":y_logit,
+                "y_pred":y_pred,
+                "y_true":y_true}
+    
+    def test_step(self, batch, batch_idx):
+        y_logit, y_true, y_pred = self.step(batch, batch_idx)
+        loss = self.criterion(y_logit, y_true)
+        self.update_metric_step(y_logit,
+                                y_true,
+                                stage="test")
+        self.log_dict({"test_acc": self.metrics_test["test/acc_top1"],
+                       "test_loss": loss},
+                      on_step=False, on_epoch=True,
+                      prog_bar=True, logger=True)
+        return {"loss":loss,
+                "y_logit":y_logit,
+                "y_pred":y_pred,
+                "y_true":y_true}
+    
+    def predict_step(self, batch, batch_idx=None):
+        out = self.step(batch, batch_idx)
+        if hasattr(batch, "metadata"):
+            if "path" in batch.metadata:
+                out = [*out, batch.metadata["path"]]
+        return out
+    
+
+    def on_predict_epoch_end(self, results: List[Any]) -> None:
+        """
+        Called at the end of predicting.
+        """
+        
+#         y_logit, y_true, y_pred, paths = collect_results(results)
+        return collect_results(results)
+
+
+
+
+class LightningClassifier(BaseLightningModule):
     def __init__(self,
-                 milestones: tuple = (3, 5, 10),
-                 unfreeze_init: Optional[str] = None,
-                 unfreeze_curriculum: List[str] = ('layer4', 'layer3', 'layer2'),
-                 train_bn: bool = False):
-        super().__init__()
-        self.milestones = milestones
-        self.unfreeze_init = unfreeze_init
-        self.unfreeze_curriculum = unfreeze_curriculum
-
-        self.train_bn = train_bn
-
-    def freeze_before_training(self, pl_module: pl.LightningModule):
-        """
-        This method is called before ``configure_optimizers``
-        and should be used to freeze any modules parameters.
-        """
-#         unfreeze_layers = ['layer4']
-        modules = list(dict(pl_module.feature_extractor.named_children()).values())
-        num_params = len(modules)
-        if self.unfreeze_init == "all":
-            return
+                 backbone_name='gluon_seresnext50_32x4d',
+                 pretrained: Union[bool, str]=True,
+                 num_classes: int=1000,
+                 pool_size: int=1,
+                 pool_type: str='avg',
+                 head_type: str='linear',
+                 hidden_size: Optional[int]=512,
+                 dropout_p: Optional[float]=0.3,
+                 lr: float=2e-03,
+                 backbone_lr_mult: float=0.1,
+                 finetuning_strategy: str="feature_extractor",
+                 weight_decay: float=0.01,
+                 
+                 seed: int=None,
+                 **kwargs):
+        super().__init__(seed=seed)
+        self.save_hyperparameters()
         
-        log.info(f'[RUNNING] [freeze_before_training()] Freezing {len(modules)} layers before training, out of {num_params}.') # Unfrozen layer names: {unfreeze_layers}')
-        log.info(f'[EXPECT] Plan to unfreeze at layer={self.unfreeze_curriculum[0]} at the next milestone, epoch={self.milestones[0]}')
-        self.freeze(modules=nn.Sequential(*modules), train_bn=self.train_bn)
+        self.model = build_model(backbone_name=backbone_name,
+                                      pretrained=pretrained,
+                                      num_classes=num_classes,
+                                      pool_size=pool_size,
+                                      pool_type=pool_type,
+                                      head_type=head_type,
+                                      hidden_size=hidden_size,
+                                      dropout_p=dropout_p)
         
-#         for k in list(modules.keys()):
-#             for l in unfreeze_layers:
-#                 if k.startswith(l):
-#                     modules.pop(k)
-#         modules = list(modules.values())
-#         log.info(f'Freezing {len(modules)} layers before training, out of {num_params}. Unfrozen layer names: {unfreeze_layers}')
-#         self.freeze(modules=nn.Sequential(*modules), train_bn=self.train_bn)
-
-    def finetune_function(self, pl_module: pl.LightningModule, epoch: int, optimizer: Optimizer, opt_idx: int):
-        """
-        This method is called on every train epoch start and should be used to
-        ``unfreeze`` any parameters.
-        
-        Those parameters needs to be added in a new ``param_group``
-        within the optimizer.
-    .. note:: Make sure to filter the parameters based on ``requires_grad``.
-        
-        """
-        log.info(f"finetune_function(epoch={epoch})")
-        i = np.where(np.array(self.milestones)==epoch)[0]
-        if len(i):
-            i = i[0]
-            log.info(f'Unfreezing at layer={self.unfreeze_curriculum[i]} at current milestone #{i} out of {len(self.milestones)}, epoch={self.milestones[i]}')
-        else:
-            log.info(f"epoch={epoch}, proceeding with alteration to frozen/unfrozen layers")
-        
-        unfreeze_layers: List[str] = None
-        if (epoch == 0) and (self.unfreeze_init is not None):
-            unfreeze_layers = [self.unfreeze_init]
-            modules = [p for name, p in pl_module.feature_extractor.named_parameters() if name in unfreeze_layers]
-            self.unfreeze_and_add_param_group(
-                modules=nn.Sequential(*modules), optimizer=optimizer, train_bn=self.train_bn
-            )
-        else:
-            for i, epoch_i in enumerate(self.milestones):
-                if epoch_i == epoch:
-                    unfreeze_layers = self.unfreeze_curriculum[i]
-                    modules = [p for name, p in pl_module.feature_extractor.named_parameters() if name in unfreeze_layers]
-                    break
-            if unfreeze_layers:
-                self.unfreeze_and_add_param_group(
-                    modules=nn.Sequential(*modules), optimizer=optimizer, train_bn=self.train_bn
-                )            
-            
-            
-#  --- Pytorch-lightning module ---
-
-
-class TransferLearningModel(BaseLightningModule):
-
-    classifier_factory: Callable = heads.ClassifierHead
-
-    def __init__(
-                 self,
-                 classifier: heads.ClassifierHead=None,
-                 train_bn: bool = False,
-                 milestones: tuple = (2, 4, 8),
-                 batch_size: int = 32,
-                 optimizer: str = "Adam",
-                 lr: float = 1e-3,
-                 lr_scheduler_gamma: float = 1e-1,
-                 classifier_kwargs: Optional[Dict[str, Any]]=None,
-#                  num_workers: int = 6,
-                 **kwargs
-                 ) -> None:
-        """TransferLearningModel
-        Args:
-            classifier: heads.ClassifierHead instance (subclass of nn.Module) containing 3 named children:
-                1. backbone
-                2. bottleneck
-                3. head
-            train_bn: Whether the BatchNorm layers should be trainable. Defaults to False.
-            milestones: List of two epochs milestones at which to update the trainable layers
-            optimizer: str
-                Name of optimizer to use.
-            lr: Initial learning rate
-            lr_scheduler_gamma: Factor by which the learning rate is reduced at each milestone
-        """
-        super().__init__()
-        self.classifier = classifier
-        self.classifier_kwargs = classifier_kwargs or {}
-        if classifier is None:
-            self.num_classes = self.classifier_kwargs['num_classes']
-        else:
-            self.num_classes = classifier.num_classes
-        
-        self.train_bn = train_bn
-        self.milestones = milestones
-        self.batch_size = batch_size
-        self.lr = lr
-        self.lr_scheduler_gamma = lr_scheduler_gamma
-        self.optimizer_func = getattr(optim, optimizer)
-
-#         self.num_workers = num_workers
-
-        self._build_classifier()
-        self._init_metrics('all')
-
-#         self.save_hyperparameters()
-
-    def _build_classifier(self):
-        """Define model layers & loss."""
-        if self.classifier is None:
-            self.classifier = self.classifier_factory(**self.classifier_kwargs)
-        self.feature_extractor = self.classifier.backbone
+        self.set_strategy(strategy=finetuning_strategy)
     
-        self.fc = self.classifier.head        
         self.criterion = nn.CrossEntropyLoss()
-        
-    def forward(self, x):
-        """Forward pass. Returns logits."""
-        x = self.classifier(x)
-        return x
-
-    def loss(self, logits, labels):
-        return self.criterion(logits, labels)
-
-    def probs(self, x):
-        return x.softmax(dim=-1)
+        self.metrics = self.init_metrics(stage='all')
+    
+    def forward(self,x):
+        return self.model(x)
+    
+    
+    def get_lr(self, group: str=None):
+        if group is None:
+            return self.hparams.lr
+        if group == "backbone":
+            return self.hparams.lr * self.hparams.backbone_lr_mult
+        if group == "head":
+            return self.hparams.lr
     
     def configure_optimizers(self):
-        parameters = list(self.parameters())
-        trainable_parameters = list(filter(lambda p: p.requires_grad, parameters))
-        rank_zero_info(
-            f"The model will start training with only {len(trainable_parameters)} "
-            f"trainable parameters out of {len(parameters)}."
-        )
-        log.info(f"self.lr={self.lr}")
-        optimizer = self.optimizer_func(trainable_parameters, lr=self.lr)
-        scheduler = MultiStepLR(optimizer, milestones=self.milestones, gamma=self.lr_scheduler_gamma)
-        return [optimizer], [scheduler]
-    
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    
-#     def training_step(self, batch, batch_idx):
-#         # 1. Forward pass:
-#         x, y = batch
-#         y_hat = self(x)
-#         loss = self.loss(y_hat, y)
-        
-#         y_prob = self.probs(y_hat)
-#         y_pred = torch.max(y_prob, dim=1)[1]
-        
-#         return {'loss':loss,
-#                 'log':{
-#                        'train_loss':loss,
-#                        'y_prob':y_prob,
-#                        'y_pred':y_pred,
-#                        'y_true':y,
-#                        'batch_idx':batch_idx
-#                        }
-#                }
-        
-#     def training_step_end(self, outputs):
-#         logs = outputs['log']
-#         loss = outputs['loss']
-#         idx = logs['batch_idx']
-#         y_prob, y_pred, y = logs['y_prob'], logs['y_pred'], logs['y_true']
-        
-#         batch_metrics = self.metrics_train_avg(y_prob, y)
-#         self.log_dict(batch_metrics)
-        
-#         self.log('train/acc',
-#                  self.metrics_train_avg['train/acc_top1'], 
-#                  on_step=True,
-#                  on_epoch=True,
-#                  prog_bar=True)
-#         self.log('train/loss', loss,
-#                  on_step=True,# on_epoch=True)#,
-#                  logger=True, prog_bar=True)
-        
-        
-#     def validation_step(self, batch, batch_idx):
-#         x, y = batch
-#         y_hat = self(x)
-#         loss = self.loss(y_hat, y)
-#         y_prob = self.probs(y_hat)
-#         y_pred = torch.max(y_prob, dim=1)[1]
-#         return {'loss':loss,
-#                 'log':{
-#                        'val_loss':loss,
-#                        'y_prob':y_prob,
-#                        'y_pred':y_pred,
-#                        'y_true':y,
-#                        'batch_idx':batch_idx
-#                        }
-#                }
-
-#     def validation_step_end(self, outputs):
-#         logs = outputs['log']
-#         loss = logs['val_loss']
-#         y_prob, y_pred, y = logs['y_prob'], logs['y_pred'], logs['y_true']
-#         batch_metrics = self.metrics_val(y_prob, y)
-        
-#         for k in self.metrics_val.keys():
-#             self.log(k,
-#                      self.metrics_val[k],
-#                      on_step=True, 
-#                      on_epoch=True)        
-
-#         self.log('val/loss',loss,
-#                  on_step=True, on_epoch=True,
-#                  logger=True, prog_bar=True)
-
-
-
-
-
-
-
-# class FeedForwardBackbone(pl.LightningModule):
-#     def __init__(self, config: DictConfig, **kwargs):
-#         self.embedding_cat_dim = sum([y for x, y in config.embedding_dims])
-#         super().__init__()
-#         self.save_hyperparameters(config)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# class MyLightningCLI(LightningCLI):
-
-#     def add_arguments_to_parser(self, parser):
-#         parser.add_class_arguments(MilestonesFinetuning, 'finetuning')
-#         parser.link_arguments('data.batch_size', 'model.batch_size')
-# #         parser.link_arguments('data.num_classes', 'model.num_classes', apply_on="instantiate")
-#         parser.link_arguments('finetuning.milestones', 'model.milestones')
-#         parser.link_arguments('finetuning.train_bn', 'model.train_bn')
-#         parser.set_defaults({
-#             'trainer.max_epochs': 15,
-#             'trainer.weights_summary': None,
-#             'trainer.progress_bar_refresh_rate': 1,
-#             'trainer.num_sanity_val_steps': 0,
-#         })
-        
-        
-
-#     def instantiate_trainer(self):
-#         finetuning_callback = MilestonesFinetuning(**self.config_init['finetuning'])
-#         self.trainer_defaults['callbacks'] = [finetuning_callback]
-#         super().instantiate_trainer()
-
-        
-        
-        
-
-
-
-
-
-from omegaconf import OmegaConf
-from contrastive_learning.data.pytorch.datamodules import get_datamodule
-
-    
-def get_configs(DATASET_NAME: str="PNAS_family_100_512",
-                MODEL_NAME: str="resnet18",
-                batch_size: int=12,
-                image_size: Tuple[int]=(512,512),
-                channels: int=3):
-
-    data_config = OmegaConf.create(
-                    dict(
-                         name=DATASET_NAME,
-                         batch_size=batch_size,
-                         val_split=None, #0.2,
-                         num_workers=8,
-                         seed=None,
-                         debug=False,
-                         normalize=True,
-                         image_size=image_size,
-                         channels=channels,
-                         dataset_dir=None
-                        )
-    )
-
-    model_config = OmegaConf.create(
-                    dict(
-                         name=MODEL_NAME,
-                         pretrained=True,
-                         input_size=(2, data_config.channels, *data_config.image_size),
-                         lr=1e-3,
-                         lr_scheduler_gamma=1e-1
-                        )
-    )
-    
-    
-    trainer_config = OmegaConf.create(
-                    dict(
-                         gpus = 1,
-                         min_epochs = 1,
-                         max_epochs = 40,
-                         weights_summary = "top",
-                         progress_bar_refresh_rate = 10,
-                         profiler = "simple",
-                         log_every_n_steps = 50,
-                         fast_dev_run = False,
-                         limit_train_batches = 1.0,
-                         limit_val_batches = 1.0,
-                         auto_lr_find = False,
-                         auto_scale_batch_size = False
-                        )
-    )
-    
-    callback_config = OmegaConf.create(
-                    dict(finetuning=
-                             dict(
-                                 milestones=[5,10],
-                                 train_bn=False
-                                 )
-                        )
-    )
-
-    return data_config, model_config, trainer_config, callback_config
-    
-
-def setup_train(data_config,
-                model_config,
-                trainer_config,
-                callback_config,
-                working_dir: str,
-                verbose: bool=1):
-
-    datamodule = get_datamodule(data_config = data_config)
-    model_config.num_classes = len(datamodule.classes)
-
-#     backbone = backbones.build_model(model_config.name,
-#                                      pretrained=model_config.pretrained)
-
-    classifier = ClassifierHead(backbone_name=model_config.name,
-                       num_classes=model_config.num_classes,
-                       finetune=True)
-    
-    model = TransferLearningModel(
-                                  classifier=classifier,
-                                  train_bn = callback_config['finetuning']['train_bn'],
-                                  milestones = callback_config['finetuning']['milestones'],
-                                  batch_size = data_config.batch_size,
-                                  optimizer = "Adam",
-                                  lr = model_config.lr,
-                                  lr_scheduler_gamma = model_config.lr_scheduler_gamma
-#                                   num_workers = 6,
-                                 )
-    
-    loggers = [pl.loggers.wandb.WandbLogger(
-                                            entity = "jrose",
-                                            project = "image_classification",
-                                            job_type = "train",
-                                            group="stage_0",
-                                            config={'data':OmegaConf.to_container(data_config, resolve=True),
-                                                    'model':OmegaConf.to_container(model_config, resolve=True)
-                                                   }),
-               pl.loggers.csv_logs.CSVLogger(
-                                             save_dir = f'{working_dir}/logs',
-                                             name = "csv/"
-                                            )
-              ]    
-    finetuning_callback = MilestonesFinetuning(**callback_config['finetuning'])
-    callbacks = [finetuning_callback]
-    
-    train_config = OmegaConf.to_container(trainer_config, resolve=True)
-    trainer = pl.Trainer(**train_config,
-                         logger=loggers,
-                         callbacks=callbacks)
-    
-
-#     log_model_summary(model=model,
-#                       working_dir=working_dir,
-#                       input_size=list(model_config.input_size),
-#                       full_summary=True,
-#                       verbose=verbose)
-
-    return datamodule, model, trainer
-
-    
-    
-
-def cli_main(config_overrides = dict(DATASET_NAME="PNAS_family_100_512",
-                                     MODEL_NAME="resnet50",
-                                     batch_size=12,
-                                     image_size=(512,512),
-                                     channels=3),
-             seed=1265
-            ):
-    
-    seed_everything(seed)
-    MODEL_NAME = config_overrides['MODEL_NAME']
-    DATASET_NAME = config_overrides['DATASET_NAME']
-    
-    working_dir = f"/media/data/jacob/GitHub/lightning-hydra-classifiers/notebooks/playground_results/{MODEL_NAME}-{DATASET_NAME}"
-    os.makedirs(working_dir, exist_ok=True)
-    
-    data_config, model_config, trainer_config, callback_config = get_configs(**config_overrides)
-    
-    
-    datamodule, model, trainer = setup_train(data_config,
-                                             model_config,
-                                             trainer_config,
-                                             callback_config,
-                                             working_dir=working_dir,
-                                             verbose=1)
-
-    
-#     print(f'Model:\n{dir(model)}')
-#     print(f'DataModule:\n{dir(datamodule)}')
-    
-    trainer.fit(model, datamodule=datamodule)
-    
-    trainer.test()
-
-    
-    
-if __name__ == "__main__":
-#     cli_lightning_logo()
-    cli_main()
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    #     def training_step(self, batch, batch_idx):
-#         # 1. Forward pass:
-#         x, y = batch
-#         y_hat = self(x)
-#         loss = self.loss(y_hat, y)
-        
-#         y_prob = self.probs(y_hat)
-#         y_pred = torch.max(y_prob, dim=1)[1]
-        
-#         return {'loss':loss,
-#                 'log':{
-#                        'train_loss':loss,
-#                        'y_prob':y_prob,
-#                        'y_pred':y_pred,
-#                        'y_true':y,
-#                        'batch_idx':batch_idx
-#                        }
-#                }
-        
-#     def training_step_end(self, outputs):
-#         logs = outputs['log']
-#         loss = outputs['loss']
-#         idx = logs['batch_idx']
-#         y_prob, y_pred, y = logs['y_prob'], logs['y_pred'], logs['y_true']
-        
-#         batch_metrics = self.train_metrics(y_prob, y)
-#         self.log_dict(batch_metrics)
-        
-#         self.log('train/acc',
-#                  self.train_metrics['train/acc_top1'], 
-#                  on_step=True,
-#                  on_epoch=True,
-#                  prog_bar=True)
-#         self.log('train/loss', loss,
-#                  on_step=True,# on_epoch=True)#,
-#                  logger=True, prog_bar=True)
-        
-        
-#     def validation_step(self, batch, batch_idx):
-#         x, y = batch
-#         y_hat = self(x)
-#         loss = self.loss(y_hat, y)
-#         y_prob = self.probs(y_hat)
-#         y_pred = torch.max(y_prob, dim=1)[1]
-#         return {'loss':loss,
-#                 'log':{
-#                        'val_loss':loss,
-#                        'y_prob':y_prob,
-#                        'y_pred':y_pred,
-#                        'y_true':y,
-#                        'batch_idx':batch_idx
-#                        }
-#                }
-
-#     def validation_step_end(self, outputs):
-        
-#         logs = outputs['log']
-#         loss = logs['val_loss']
-#         y_prob, y_pred, y = logs['y_prob'], logs['y_pred'], logs['y_true']
-#         batch_metrics = self.val_metrics(y_prob, y)
-        
-#         for k in self.val_metrics.keys():
-#             self.log(k,
-#                      self.val_metrics[k],
-#                      on_step=True, 
-#                      on_epoch=True)        
-
-#         self.log('val/loss',loss,
-#                  on_step=True, on_epoch=True,
-#                  logger=True, prog_bar=True)
-
-# #         self.log('val/acc',
-# #                  self.val_metrics['val/acc_top1'],
-# #                  on_step=True, 
-# #                  on_epoch=True,
-# #                  prog_bar=True)
+        print(f"self.hparams={self.hparams}")
+        self.optimizer = torch.optim.AdamW([{"params":self.model.backbone.parameters(), "lr":self.get_lr("backbone"), "weight_decay": self.hparams.weight_decay},
+                                            {"params":self.model.head.parameters(), "lr":self.get_lr("head"), "weight_decay": self.hparams.weight_decay}])
+#         self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=self.config.t_max, eta_min=self.config.min_lr)
+
+        return {'optimizer': self.optimizer}

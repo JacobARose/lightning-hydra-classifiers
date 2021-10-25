@@ -17,18 +17,12 @@ from typing import Union, Callable, Tuple
 
 import torch
 import torch.nn.functional as F
-from torch import nn, optim
-from lightning_hydra_classifiers.models.transfer import cli_main
+# from torch import nn, optim
+# from lightning_hydra_classifiers.models.transfer import cli_main
+# from rich import print as pp
 
-
-from rich import print as pp
-
-
-
-import os
 import argparse
 import multiprocessing
-from pathlib import Path
 from PIL import Image
 
 from munch import Munch
