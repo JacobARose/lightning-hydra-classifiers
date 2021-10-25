@@ -29,7 +29,9 @@ __all__ = ["MultiTaskDataModule"]
 # class BaseTaskDataModule(pl.LightningDataModule):
 class MultiTaskDataModule(pl.LightningDataModule):
     # TBD: Merge this with previous BaseDataModule from common.py
-    
+    dataset_names: Dict[str,str] = {"task_0":"Extant_family_10",
+                                    "task_1":"PNAS_family_100",
+                                    "task_2":"Fossil_family_3"}
     def __init__(self, 
                  batch_size,
                  task_id: int=0,

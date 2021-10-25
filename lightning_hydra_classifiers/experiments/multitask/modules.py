@@ -301,6 +301,7 @@ class LitMultiTaskModule(pl.LightningModule, BaseModule):
 
     def validation_step(self, batch, batch_idx):
         y_logit, y_true, y_pred = self.step(batch, batch_idx)
+        
         loss = self.criterion(y_logit, y_true)
 #         y_pred = torch.argmax(y_logit, dim=-1)
 #         scores = self.metrics_val(y_logit, y_true)
@@ -317,11 +318,13 @@ class LitMultiTaskModule(pl.LightningModule, BaseModule):
                              omit_metric_keys=["val/acc_top1"])
 #         self.log_dict({k:v for k,v in self.metrics_val.items() if k != "val/acc_top1"},
 #                  on_step=False, on_epoch=True, prog_bar=True, logger=True)
-        
+        path, catalog_number = getattr(batch, "path"), getattr(batch, "catalog_number")
         return {"loss":loss,
                 "y_logit":y_logit,
                 "y_pred":y_pred,
-                "y_true":y_true}
+                "y_true":y_true,
+                "path":path,
+                "catalog_number":catalog_number}
     
     def test_step(self, batch, batch_idx):
         y_logit, y_true, y_pred = self.step(batch, batch_idx)

@@ -9,11 +9,85 @@ Author: Jacob A Rose
 """
 
 import matplotlib.pyplot as plt
+import pandas as pd
 from pathlib import Path
+import seaborn as sns
 from typing import List, Optional
 from PIL import Image
 
-__all__ = ["colorbar", "display_images"]
+__all__ = ["plot_confusion_matrix", "colorbar", "display_images"]
+
+
+
+
+
+
+    
+def plot_confusion_matrix(cm: pd.DataFrame,
+                          labels: List[str]=None,
+                          robust: bool=False,
+                          title: str="Confusion matrix of val predictions for model",
+                          save_path: Optional[str]=None,
+                          backend="seaborn"):
+    """
+    Helper function with good defaults for quickly plotting confusion matrices, whether num_classes=10 or 200.
+    
+    Optionally plot as an interactive plot using plotly, defaults to seaborn.
+    
+    Caution: confusion matrices with 50 or more classes can cause major lag issues with plotly.
+    
+    """
+    num_classes = cm.shape[0]
+    
+    linewidths = 0.01
+    if num_classes < 15:
+        figsize = (9,8)
+    elif num_classes < 60:
+        figsize = (18,16)
+    elif num_classes < 150:
+        figsize = (18,16)
+        linewidths = 0.0
+    elif num_classes >= 150:
+        figsize = (27, 24)
+        linewidths = 0.0
+
+    annot = True if num_classes<=35 else False
+
+    if backend=="plotly":
+        import plotly.figure_factory as ff
+        
+        size = 20*num_classes
+        fig = ff.create_annotated_heatmap(z=cm,
+                                          x=labels,
+                                          y=labels)
+        fig.update_layout(height=size,
+                          width=size+40)
+#         fig = px.imshow(cm,
+#                         labels=dict(x="Predicted Labels", y="True Labels", color="Count"),
+#                         title=title)
+        ax = plt.gca()
+        if isinstance(save_path, str):
+            fig.write_html(f"{save_path}.html")
+            
+    elif backend=="seaborn":
+        fig, ax = plt.subplots(1,1, figsize=figsize)
+
+        sns.heatmap(cm,
+                    linewidths=linewidths,
+                    robust=robust,
+                    square=True,
+                    annot=annot,
+                    fmt="d",
+                    cmap="BuGn",
+                    cbar_kws={"shrink": .9})
+        plt.title(title)
+        if isinstance(save_path, str):
+            plt.savefig(f"{save_path}.png")
+    
+    return fig, ax
+
+
+
 
 
 def colorbar(mappable):

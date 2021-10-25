@@ -95,7 +95,7 @@ __all__ = ["TransferExperiment", "TransferExperimentConfig", "Extant_to_PNAS_Exp
 
 class TransferExperiment:
     
-    valid_tasks = (0, 1)
+    valid_tasks = (0, 1, 2)
     
     def __init__(self,
                  config=None):
@@ -218,6 +218,45 @@ class TransferExperiment:
         task_1 = B_minus_A_data_splits
 
         return task_1
+    
+    def setup_task_2(self): #experiment_root_dir = Path("/media/data_cifs/projects/prj_fossils/users/jacob/experiments/July2021-Nov2021/csv_datasets/leavesdb-v1_0/")):
+        """
+        TASK 2
+        Produces train, val, and test subsets for task 2
+
+        train + val: 
+            Extant_Leaves_minus_PNAS
+        test:
+            Extant_Leaves_in_PNAS
+            
+        Returns:
+            task_0 (Dict[str,pd.DataFrame])
+
+        """
+        
+        
+        task_dir = Path("/media/data_cifs/projects/prj_fossils/users/jacob/experiments/July2021-Nov2021/csv_datasets/leavesdb-v1_0/Fossil_family_3_512")
+#         A_minus_B_dir = Path(source_root_dir, self.task_0_name)
+#         A_minus_B_dir = Path(source_root_dir, self.task_0.name)
+
+        config_path = list(task_dir.glob("./CSVDataset-config.yaml"))[0]
+        dataset_path = list(task_dir.glob("./*full_dataset.csv"))[0]
+        config = CSVDatasetConfig.load(path = config_path)
+        dataset = CSVDataset.from_config(config, eager_encode_targets=False)
+#         dataset.config.task_tag = "Extant_10_512"
+        ##########################################
+        
+        task_2 = DataSplitter.create_trainvaltest_splits(data=dataset,
+                                                         val_split=0.2, #self.task_2.val_split,
+                                                         test_split=0.3, #self.task_2.test_split,
+                                                         shuffle=True,
+                                                         seed=self.seed,
+                                                         stratify=True)
+        return task_2
+    
+    
+    
+    
         
     def export_experiment_spec(self, output_root_dir=None):
         
@@ -230,6 +269,7 @@ class TransferExperiment:
         
         task_0 = self.setup_task_0()
         task_1 = self.setup_task_1()
+        task_2 = self.setup_task_2()
 
         task_0_label_encoder = task_0['train'].label_encoder
         task_0_label_encoder.__init__(replacements = replace_class_indices)
@@ -259,9 +299,22 @@ class TransferExperiment:
         task_1_label_encoder.fit(task_1['train'].targets)
         task_1['val'].label_encoder = task_1_label_encoder
         task_1['test'].label_encoder = task_1_label_encoder
-
+        
         task_1_dir = Path(experiment_dir, "task_1")
         os.makedirs(task_1_dir, exist_ok=True)
+        
+        task_2_label_encoder = task_2['train'].label_encoder
+        task_2_label_encoder.__init__(replacements = replace_class_indices)
+        task_2_label_encoder.fit(task_2['test'].targets)
+        task_2_label_encoder.fit(task_2['train'].targets)
+        task_2['val'].label_encoder = task_2_label_encoder
+        task_2['test'].label_encoder = task_2_label_encoder
+        
+        task_2_dir = Path(experiment_dir, "task_2")
+        os.makedirs(task_2_dir, exist_ok=True)
+
+        
+        
         for subset in ["train","val","test"]:
             task_1[subset].setup(samples_df=task_1[subset].samples_df,
                                  label_encoder=task_1[subset].label_encoder,
@@ -271,7 +324,16 @@ class TransferExperiment:
                                                   config=task_1[subset].config,
                                                   encoder=task_1_label_encoder,
                                                   dataset_name=subset)
-        
+
+            task_2[subset].setup(samples_df=task_2[subset].samples_df,
+                                 label_encoder=task_2[subset].label_encoder,
+                                 fit_targets=False)
+            CSVDatasetConfig.export_dataset_state(output_dir=task_2_dir, # / subset,
+                                                  df=task_2[subset].samples_df,
+                                                  config=task_2[subset].config,
+                                                  encoder=task_2_label_encoder,
+                                                  dataset_name=subset)
+
         exp_config_path = os.path.join(experiment_dir, "experiment.yaml")
         ETL.config2yaml(self.config, exp_config_path)
         print(f"[SUCCESS] Experiment files can be found at: {experiment_dir}:")
@@ -288,30 +350,36 @@ class TransferExperiment:
         experiment_dir = Path(self.experiment_dir)
         task_0_dir = experiment_dir / "task_0"
         task_1_dir = experiment_dir / "task_1"
-        task_0, task_1 = {}, {}
+        task_2_dir = experiment_dir / "task_2"
+        task_0, task_1, task_2 = {}, {}, {}
 
         for subset in ["train","val","test"]:
             task_0[subset], _ = CSVDatasetConfig.import_dataset_state(config_path = task_0_dir / f"{subset}.yaml")
             task_1[subset], _ = CSVDatasetConfig.import_dataset_state(config_path = task_1_dir / f"{subset}.yaml")
+            task_2[subset], _ = CSVDatasetConfig.import_dataset_state(config_path = task_2_dir / f"{subset}.yaml")
+            print(f"task_0[{subset}].eager_encode_targets = {task_0[subset].eager_encode_targets}")
+            
 
         if train_transform:
             task_0["train"].transform = train_transform
             task_1["train"].transform = train_transform
+            task_2["train"].transform = train_transform
         if train_target_transform:
             task_0["train"].target_transform = train_target_transform
             task_1["train"].target_transform = train_target_transform
+            task_2["train"].target_transform = train_target_transform
 
         for subset in ["val","test"]:
             if train_transform:
                 task_0[subset].transform = val_transform
                 task_1[subset].transform = val_transform
+                task_2[subset].transform = val_transform
             if val_target_transform:
                 task_0[subset].target_transform = val_target_transform
                 task_1[subset].target_transform = val_target_transform
+                task_2[subset].target_transform = val_target_transform
 
-                
-                
-        return task_0, task_1
+        return task_0, task_1, task_2
 
 
 
@@ -336,9 +404,9 @@ def cmdline_args():
                               "Extant-to-Fossil-512-transfer_benchmark"],
                    help="Experiment name. Experiment logs will be located within a subdirectory with this name, located in the experiment_root_dir.")
     
-    p.add_argument("-seed", dest="seed", type = int,
-                   default = 98989,
-                   help="Experiment seed.")
+#     p.add_argument("-seed", dest="seed", type = int,
+#                    default = 98989,
+#                    help="Experiment seed.")
     
 
     args = p.parse_args()

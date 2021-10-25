@@ -186,7 +186,7 @@ class ETL(ETLBase):
             
         # import dataset samples from a csv file as a CustomDataset/CSVDataset object
         dataset = CSVDataset.from_config(config,
-                                         eager_encode_targets=True)
+                                         eager_encode_targets=False) # True)
         dataset.setup(samples_df=dataset.samples_df,
                       label_encoder=label_encoder,
                       fit_targets=True)

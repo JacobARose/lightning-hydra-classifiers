@@ -12,7 +12,7 @@ import torchmetrics as metrics
 # from typing import List
 
 
-
+__all__ = ["get_scalar_metrics", "get_per_class_metrics"]
 
 
 def get_scalar_metrics(num_classes: int,

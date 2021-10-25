@@ -19,7 +19,72 @@ from torch import nn
 from torchinfo import summary
 
 
-__all__ = ["log_model_summary"]
+__all__ = ["count_parameters", "collect_results", "log_model_summary"]
+
+from more_itertools import unzip
+from toolz.itertoolz import concat
+from prettytable import PrettyTable
+
+
+
+def count_parameters(model, verbose: bool=True):
+    table = PrettyTable(["Modules", "Parameters"])
+    total_params = 0
+    trainable_params = 0
+    for name, parameter in model.named_parameters():
+        param = parameter.numel()
+        
+        total_params += param
+        if not parameter.requires_grad:
+            continue
+        table.add_row([name, param])
+        trainable_params+=param
+    if verbose:
+        print(table)
+    print(f"Total Trainable Params: {trainable_params:,}")
+    print(f"Total non-Trainable Params: {total_params-trainable_params:,}")
+    return table
+
+
+def collect_results(results):
+    """
+    Converts a list of flat records/rows to a list of tall, row-wise concatenated columns
+    
+    Useful for collecting a set of batches or individual samples of 0- and 1-dimensional tensors returned by each model step, collected in a list in model.on_epoch_end.
+    
+    in:
+        [(item_00, item_01,... item_0C),
+         (item_10, item_11,... item_1C),
+         ...
+         (item_N0, item_N1,... item_NC)]
+     out:
+         [[item_00, item_10,... item_N0],
+         [item_01, item_11,... item_N1],
+         ...
+         [item_0C, item_1C,... item_NC]]
+    
+    """
+
+    rows = [list(concat(r)) for r in unzip(results)]
+    cols = []*len(rows)
+    print(cols)
+    for i, row in enumerate(rows):
+        if isinstance(row[0], torch.Tensor):
+            if len(row[0].shape) <= 1:
+                cols.append(torch.stack(row, dim=0).cpu().numpy())
+            else:
+                cols.append(torch.cat(row).cpu().numpy())
+        elif isinstance(row[0], list):
+            cols.extend(list(concat(row)))
+        elif isinstance(row[0], (str, int)):
+            cols.append(list(row))
+
+    np.all([len(c)==len(cols[0]) for c in cols])
+    
+    return cols
+
+
+
 
 
 def log_model_summary(model: nn.Module,

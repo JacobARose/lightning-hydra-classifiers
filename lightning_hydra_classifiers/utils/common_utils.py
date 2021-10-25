@@ -12,10 +12,12 @@ Author: Jacob A Rose
 import os
 from pathlib import Path
 import pandas as pd
+import matplotlib.pyplot as plt
 import numpy as np
 import numbers
 from typing import Union, List, Any, Tuple, Dict, Optional, Sequence
 import collections
+import seaborn as sns
 from sklearn.model_selection import train_test_split
 import json
 import torchdata
@@ -350,7 +352,8 @@ class DataSplitter:
 def plot_class_distributions(targets: List[Any], 
                              sort_by: Optional[Union[str, bool, Sequence]]="count",
                              ax=None,
-                             xticklabels: bool=True):
+                             xticklabels: bool=True,
+                             hist_kwargs: Optional[Dict]=None):
     """
     Example:
         counts = plot_class_distributions(targets=data.targets, sort=True)
@@ -364,7 +367,7 @@ def plot_class_distributions(targets: List[Any],
 
     if ax is None:
         plt.figure(figsize=(20,12))
-    ax = sns.histplot(x=keys, weights=values, discrete=True, ax=ax)
+    ax = sns.histplot(x=keys, weights=values, discrete=True, ax=ax, **hist_kwargs)
     plt.sca(ax)
     if xticklabels:
         xtick_fontsize = "medium"
@@ -392,22 +395,39 @@ def plot_class_distributions(targets: List[Any],
 #############################################################
 
 
-def plot_split_distributions(data_splits: Dict[str, "CommonDataset"]):
+def plot_split_distributions(data_splits: Dict[str, "CommonDataset"],
+                             use_one_axis: bool=False,
+                             hist_kwargs: Optional[Dict]=None):
     """
     Create 3 vertically-stacked count plots of train, val, and test dataset class label distributions
+    
+    Arguments:
+        data_splits: Dict[str, "CommonDataset"],
+            Dictionary mapping str split names to Dataset objects that at least have a Dataset.targets attribute for labels.
+        use_one_axis: bool=False
+            If true, Plot all subsets to the same axis overlayed on top of each other. If False, plot them in individual subplots in the same figure.
+        hist_kwargs: Optional[Dict]=None
+            Optional additional kwargs to be passed to sns.histplot(**hist_kwargs)
+    
     """
     assert isinstance(data_splits, dict)
     num_splits = len(data_splits)
     
-    if num_splits < 4:
-        rows = num_splits
-        cols = 1
+    if use_one_axis:
+        rows, cols = 1, 1
+        fig, ax = plt.subplots(rows, cols, figsize=(20*cols,10*rows))
+        ax = [ax]*num_splits
     else:
-        rows = int(num_splits // 2)
-        cols = int(num_splits % 2)
-    fig, ax = plt.subplots(rows, cols, figsize=(20*cols,10*rows))
-    ax = ax.flatten()
-    
+        if num_splits <= 3:
+            rows = num_splits
+            cols = 1
+        else:
+            rows = int(num_splits // 2)
+            cols = int(num_splits % 2)
+            
+        fig, ax = plt.subplots(rows, cols, figsize=(20*cols,10*rows))    
+        if hasattr(ax, "flatten"):
+            ax = ax.flatten()
     
     train_key = [k for k,v in data_splits.items() if "train" in k]
     sort_by = True
@@ -422,12 +442,13 @@ def plot_split_distributions(data_splits: Dict[str, "CommonDataset"]):
     num_samples = 0
     counts = {}
     for i, (k, v) in enumerate(data_splits.items()):
-        if i == len(data_splits)-1:
+        if i == num_splits-1:
             xticklabels=True
         counts[k] = plot_class_distributions(targets=v.targets, 
                                              sort_by=sort_by,
                                              ax = ax[i],
-                                             xticklabels=xticklabels)
+                                             xticklabels=xticklabels,
+                                             hist_kwargs=hist_kwargs)
         num_nonzero_classes = len([name for name, count_i in counts[k].items() if count_i > 0])
         
         title = f"{k} [n={len(v)}"

@@ -13,61 +13,61 @@ DEPRECATED: Thursday Sept 2, 2021
 # from contrastive_learning.data.pytorch.pnas import PNASLightningDataModule, PNASLeavesDataset
 # from contrastive_learning.data.pytorch.common import DataStageError, TrainValSplitDataset
 
+pass
 
 
 
-
-class TestPNASLightningDataModule:
+# class TestPNASLightningDataModule:
     
-    def run(self):
-        self.test_setup()
+#     def run(self):
+#         self.test_setup()
     
 
-    def test_setup(self):
+#     def test_setup(self):
         
-        data = PNASLightningDataModule()
+#         data = PNASLightningDataModule()
 
-        data.setup(stage='fit')
-        assert hasattr(data, 'train_dataset')
-        assert hasattr(data, 'val_dataset')
-        assert not hasattr(data, 'test_dataset')
+#         data.setup(stage='fit')
+#         assert hasattr(data, 'train_dataset')
+#         assert hasattr(data, 'val_dataset')
+#         assert not hasattr(data, 'test_dataset')
 
-        assert isinstance(data.train_dataset, (PNASLeavesDataset,TrainValSplitDataset))
-        assert isinstance(data.val_dataset, (PNASLeavesDataset,TrainValSplitDataset))
-        del data.train_dataset
-        del data.val_dataset
+#         assert isinstance(data.train_dataset, (PNASLeavesDataset,TrainValSplitDataset))
+#         assert isinstance(data.val_dataset, (PNASLeavesDataset,TrainValSplitDataset))
+#         del data.train_dataset
+#         del data.val_dataset
 
-        ##########################################
+#         ##########################################
         
-        data.setup(stage='test')
-        assert not hasattr(data, 'train_dataset')
-        assert not hasattr(data, 'val_dataset')
-        assert hasattr(data, 'test_dataset')
-        assert isinstance(data.test_dataset, PNASLeavesDataset)
-        del data.test_dataset
+#         data.setup(stage='test')
+#         assert not hasattr(data, 'train_dataset')
+#         assert not hasattr(data, 'val_dataset')
+#         assert hasattr(data, 'test_dataset')
+#         assert isinstance(data.test_dataset, PNASLeavesDataset)
+#         del data.test_dataset
         
-        ##########################################
+#         ##########################################
         
-        data.setup(stage=None)
-        assert hasattr(data, 'train_dataset')
-        assert hasattr(data, 'val_dataset')
-        assert not hasattr(data, 'test_dataset')
+#         data.setup(stage=None)
+#         assert hasattr(data, 'train_dataset')
+#         assert hasattr(data, 'val_dataset')
+#         assert not hasattr(data, 'test_dataset')
 
-        assert isinstance(data.train_dataset, (PNASLeavesDataset,TrainValSplitDataset))
-        assert isinstance(data.val_dataset, (PNASLeavesDataset,TrainValSplitDataset))
-        del data.train_dataset
-        del data.val_dataset
+#         assert isinstance(data.train_dataset, (PNASLeavesDataset,TrainValSplitDataset))
+#         assert isinstance(data.val_dataset, (PNASLeavesDataset,TrainValSplitDataset))
+#         del data.train_dataset
+#         del data.val_dataset
 
-        ##########################################
+#         ##########################################
         
-        try:
-            data.setup(stage='other')
-        except DataStageError as e:
-            pass
+#         try:
+#             data.setup(stage='other')
+#         except DataStageError as e:
+#             pass
             
-        assert not hasattr(data, 'train_dataset')
-        assert not hasattr(data, 'val_dataset')
-        assert not hasattr(data, 'test_dataset')
+#         assert not hasattr(data, 'train_dataset')
+#         assert not hasattr(data, 'val_dataset')
+#         assert not hasattr(data, 'test_dataset')
 
         ##########################################
         ##########################################
