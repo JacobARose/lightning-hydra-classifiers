@@ -1,0 +1,8 @@
+
+
+defaults:
+    - base_classifier
+    
+
+pool_type: 'avgdrop'
+dropout_p: 0.2

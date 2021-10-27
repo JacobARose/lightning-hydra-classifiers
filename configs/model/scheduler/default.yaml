@@ -1,0 +1,6 @@
+
+defaults:
+    - base_scheduler
+    - linear_warmup_cosine_decay_warm_restarts
+    
+# _target_: null

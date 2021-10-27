@@ -29,11 +29,22 @@ To generate all datasets at all resolutions & thresholds, run:
 ```
 bash "{git_dir}/lightning-hydra-classifiers/lightning_hydra_classifiers/data/utils/generate_all_data_multi-res-thresh.sh"
 
+
+
+├── 1. generate_multires_images.py [High Disk Usage]
+│   ├── Creates multiple explicit copies of mixed-resolution image datasets by resizing all images to a single size using a smart-crop resize method.
+├── 2. generate_multithresh_symlink_trees.py [Low Disk Usage]
+│   ├── After creating multiple resolutions of your datasets, produce various softlink copies, each containing a subset of the original samples, acquired by filtering out classes below a minimum threshold population.
+├── 3. make_catalogs.py
+│   ├── After creating all image file-specific versions described above, produce low-profile dataset artifacts, consisting of a combination of CSV sample catalogs (path, unique_id, labels, ...), yaml configs, and json class name encodings, for every dataset.
+├── 4. catalog_registry.py
+│   ├── Use the code in this script to display available datasets previously produced by steps 1-3 above, and load them.
+├── 5/ clean_ipynb_ckpts.sh
+│   ├── Conveniently remove all .ipynb_ckpts from the main dataset directory on data_cifs
+├── 6. generate_all_data_multi-res-thresh.sh
+│   ├── Runs the full set of options for scripts 1-3 and 5 above!
+
 ```
-
-
-
-
 
 
 

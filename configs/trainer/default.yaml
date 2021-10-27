@@ -38,7 +38,7 @@ overfit_batches: 0
 # others
 # amp_backend: "native"
 amp_level: "02"
-precision: 32
+precision: 16
 # accelerator: null
 # num_nodes: 1
 # tpu_cores: null

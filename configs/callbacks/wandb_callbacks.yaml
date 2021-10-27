@@ -1,5 +1,16 @@
+
 defaults:
     - base_callbacks.yaml
+
+
+class_counts_stats:
+    _target_: lightning_hydra_classifiers.callbacks.class_label_stats_callbacks.ClassLabelStatsCallback
+    subsets:
+        - "train"
+        - "val"
+        - "test"
+        
+    y_col: "family"
 
 
 log_per_class_metrics_to_wandb:
@@ -9,7 +20,6 @@ log_per_class_metrics_to_wandb:
 
 image_prediction_logger:
     _target_: lightning_hydra_classifiers.utils.callback_utils.ImagePredictionLogger
-
     top_k_per_batch: 5
     bottom_k_per_batch: 5
 
@@ -19,12 +29,11 @@ watch_model_with_wandb:
     log: "gradients"
     log_freq: 100
 
-finetuning_lightning_callback:
-    _target_: lightning_hydra_classifiers.callbacks.finetuning_callbacks.FinetuningLightningCallback
-    monitor: "val_acc"
-    mode: "max"
-    patience: 1
 
+uploadaheckpointsasartifact:
+    _target_: lightning_hydra_classifiers.utils.logging_utils.UploadCheckpointsAsArtifact
+    ckpt_dir: '${checkpoint_dir}'
+    upload_best_only: false
 
 
 # log_f1_prec_rec_heat_map:

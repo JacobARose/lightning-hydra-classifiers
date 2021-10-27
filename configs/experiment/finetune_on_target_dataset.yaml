@@ -1,0 +1,70 @@
+# @package _global_
+
+# python run.py +experiment=finetune_on_target_dataset
+
+
+
+defaults:
+#     - override /logger: many_loggers.yaml
+    - override /hydra/hydra_logging: colorlog
+    - override /hydra/job_logging: colorlog
+
+callbacks:
+    finetuning_lightning_callback:
+        _target_: lightning_hydra_classifiers.callbacks.finetuning_callbacks.FinetuningLightningCallback
+        monitor: "val_acc"
+        mode: "max"
+        patience: 2
+        init_patience: 2
+
+
+run_trial: "finetune_new_classifier"
+# run_trial: "train"
+task_id: 1
+
+
+seed: 12345
+print_config: true
+
+experiment_dir: '${root_dir}/${experiment_name}/task_${task_id}/source_task_${source.data.task_id}/replicate_${replicate}'
+
+hparams_log_path: '${results_dir}/hparams/best_hparams.yaml'
+hparams:
+    batch_size: '${data.batch_size}' # 256 # 8 #'default' #null
+    lr: 2e-03 #'default' #null # base learning rate
+    num_classes: ${model.heads.num_classes}
+    classes: null
+    class_type: "family"
+    image_size: {data.image_size}
+    dataset_name: "PNAS"
+    backbone_name: ${model.backbone.backbone_name}
+##################################
+##################################
+
+source:
+    data:
+        dataset_name: "Extant-PNAS_family_3_512"
+        task_id: 0
+    model:
+        backbone_ckpt_path: null
+    results_filepath: "/media/data_cifs/projects/prj_fossils/users/jacob/experiments/July2021-Nov2021/experiment_logs/Transfer_Experiments/finetune_trials/Extant-to-PNAS-512-transfer_benchmark-resnet50-Extant-PNAS_to_PNAS-92_classes-res_512-bsz_32-pretrained_imagenet-pool_avgdrop/replicate_1/results/results.yaml"
+
+
+model:
+    ckpt_path: '${source.model.backbone_ckpt_path}'
+
+# trainer:
+#     gradient_clip_val: 0.5
+#     accumulate_grad_batches: 2
+#     weights_summary: null
+    # resume_from_checkpoint: ${work_dir}/last.ckpt
+
+
+logger:
+    wandb:
+        tags: ['${source.data.dataset_name}', '${hparams.dataset_name}', '${hparams.backbone_name}', '${run_trial}']
+        notes: "Description of this model."
+#     neptune:
+#         tags: ["best_model"]
+#     csv_logger:
+#         save_dir: "."

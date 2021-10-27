@@ -1,8 +1,9 @@
 # @package _global_
 
+# finetune_config.yaml
 
 defaults:
-    - model: default #resnet50
+    - model: resnet50
     - data: default # extant_minus_pnas
     - trainer: default
     - callbacks: wandb_callbacks.yaml # default_callbacks.yaml
@@ -19,16 +20,24 @@ defaults:
 #     - override hydra/hydra_logging: colorlog
 #     - override hydra/job_logging: colorlog
 
+model:
+    finetuning_strategy: "finetuning_unfreeze_layers_on_plateau"
+    
 
-# root_dir: ${oc.env:WANDB_CACHE_DIR}
 
-root_dir: "/media/data_cifs/projects/prj_fossils/users/jacob/experiments/July2021-Nov2021/experiment_logs/Transfer_Experiments"
 
-replicate: '${system.replicate}'
-experiment_name: '${data.experiment.experiment_name}-${model.backbone_name}'
-experiment_dir: '${root_dir}/${experiment_name}/replicate_${replicate}'
-results_dir: '${experiment_dir}/results'
-checkpoint_dir: '${results_dir}/checkpoints/'
+
+
+
+# root_dir: "/media/data_cifs/projects/prj_fossils/users/jacob/experiments/July2021-Nov2021/experiment_logs/Transfer_Experiments/finetune_trials"
+
+# replicate: '${system.replicate}'
+# experiment_name: '${data.experiment.experiment_name}-${model.backbone_name}-${data.dataset_name}-{model.num_classes}_classes-res_{data.image_size}-bsz_${data.batch_size}-pretrained_${model.pretrained}-pool_${model.pool_type}"
+# experiment_dir: '${root_dir}/${experiment_name}/replicate_${replicate}'
+# results_dir: '${experiment_dir}/results'
+# checkpoint_dir: '${experiment_dir}/checkpoints/'
+# checkpoint_dir: '${results_dir}/checkpoints/'
+
 
 seed: 96857
 debug: False
@@ -36,12 +45,14 @@ print_config: True
 disable_warnings: True
 
 
+
+
 hydra:
-#     run:
-#         dir: hydra-logs/runs/${now:%Y-%m-%d}/${now:%H-%M-%S}
-#     sweep:
-#         dir: hydra-logs/multiruns/${now:%Y-%m-%d_%H-%M-%S}
-#         subdir: ${hydra.job.num}
+    run:
+        dir: hydra-logs/runs/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    sweep:
+        dir: hydra-logs/multiruns/${now:%Y-%m-%d_%H-%M-%S}
+        subdir: ${hydra.job.num}
 
     job:
         env_set:

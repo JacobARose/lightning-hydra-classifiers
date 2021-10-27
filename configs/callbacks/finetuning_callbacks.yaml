@@ -1,0 +1,12 @@
+# Note (10-14-21) Jacob: Switched order of callbacks s/t early stopping comes before model checkpoint, to potentially address the issue of early stopping 1 epoch too soon.
+# Idea came from: https://github.com/PyTorchLightning/pytorch-lightning/issues/1464
+
+
+
+
+# finetuning_lightning_callback:
+_target_: lightning_hydra_classifiers.callbacks.finetuning_callbacks.FinetuningLightningCallback
+monitor: "val_acc"
+mode: "max"
+patience: 2
+init_patience: 2

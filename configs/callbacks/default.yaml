@@ -2,37 +2,5 @@
 
 defaults:
     - wandb_callbacks
-    - image_stats_accumulator
+    - image_stats_callbacks
 
-
-
-
-
-
-
-
-
-
-# kwargs:
-#     monitor:
-#         metric: "val_acc"
-#         mode: "max"
-
-# model_checkpoint:
-#     _target_: pytorch_lightning.callbacks.ModelCheckpoint
-#     monitor: '${.kwargs.monitor.metric}'
-#     save_top_k: 1
-#     save_last: true
-#     mode: '${.kwargs.monitor.mode}'
-#     verbose: true
-#     dirpath: '${system.root_dir}/checkpoints/'
-#     filename: "{epoch:02d}"
-
-
-# early_stopping:
-#     _target_: pytorch_lightning.callbacks.early_stopping.EarlyStopping
-#     code_dir: ${root_dir}
-#     monitor: '${.kwargs.monitor.metric}'
-#     patience: 5
-#     verbose: false
-#     mode: '${.kwargs.monitor.mode}'

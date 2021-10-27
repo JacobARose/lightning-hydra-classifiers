@@ -1,0 +1,10 @@
+
+
+
+
+num_classes: ${model.num_classes}
+pool_size: 1
+pool_type: 'avg'
+head_type: 'linear'
+hidden_size: null #512
+dropout_p: 0.0

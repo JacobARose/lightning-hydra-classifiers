@@ -1,0 +1,10 @@
+
+# linear_warmup_cosine_decay.yaml
+
+defaults:
+    - base_scheduler
+
+scheduler_type: "linear_warmup_cosine_decay"
+
+warmup_steps: 5
+total_steps: ${trainer.max_epochs}

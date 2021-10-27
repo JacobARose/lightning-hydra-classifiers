@@ -192,7 +192,8 @@ class ImageStatsAccumulatorCallback(pl.Callback):
     
     def on_pretrain_routine_start(self, trainer, pl_module):
         self._start_time = time.time()
-        dataloader = trainer.test_dataloader()
+#         dataloader = trainer.test_dataloader()
+        dataloader = trainer.train_dataloader()
         self.accumulator.update(dataloader)
 
         

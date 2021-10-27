@@ -53,6 +53,9 @@ from typing import *
 from lightning_hydra_classifiers.utils.model_utils import count_parameters, collect_results
 from lightning_hydra_classifiers.utils.metric_utils import get_per_class_metrics, get_scalar_metrics
 from lightning_hydra_classifiers.models.backbones.backbone import build_model
+# from lightning_hydra_classifiers.experiments.multitask import schedulers
+from lightning_hydra_classifiers.experiments.multitask.schedulers import configure_schedulers
+
 
 logger = logging.Logger(__name__)
 logger.setLevel('INFO')
@@ -245,26 +248,44 @@ class LayerFreezeLightningPlugin:
                                      "feature_extractor_+_bn.eval()",
                                      "feature_extractor_+_except_bn")
     _verbose: bool = True
-    def set_strategy(self, strategy: str):
-        if strategy == "feature_extractor":
+    def set_strategy(self,
+                     feature_extractor_strategy: str=None,
+                     finetuning_strategy: str=None):
+        if feature_extractor_strategy == "feature_extractor":
             self.feature_extractor_strategy(freeze_bn=True,
                                             eval_bn=False)
-        elif strategy == "feature_extractor_+_bn.eval()":
+        elif feature_extractor_strategy == "feature_extractor_+_bn.eval()":
             self.feature_extractor_strategy(freeze_bn=True,
                                             eval_bn=True)
-        elif strategy == "feature_extractor_+_except_bn":
+        elif feature_extractor_strategy == "feature_extractor_+_except_bn":
             self.feature_extractor_strategy(freeze_bn=False,
                                             eval_bn=False)
-        elif strategy == "finetuning_unfreeze_layers_on_plateau":
-            self.finetuning_milestones = ["layer4", "layer3", "layer2", "layer1"]            
-            self.feature_extractor_strategy(freeze_bn=False,
-                                            eval_bn=False)
+        elif feature_extractor_strategy is None:
+            print(f"Initializing model from scratch due to feature_extractor_strategy=None")
+            self.freeze_bn = False
+            self.eval_bn = False
 
-            
+            self.unfreeze(self.model)
         else:
-            raise NotImplementedError(f"{strategy} is not a valid finetuning_strategy. Please select from 1 of the following {len(self.valid_strategies)} strategies: {self.valid_strategies}")
-        self.hparams.finetuning_strategy = strategy
-        if self._verbose: print(f"Set current model training strategy to: {self.hparams.finetuning_strategy}")
+            raise NotImplementedError(f"{feature_extractor_strategy} is not a valid feature_extractor_strategy. Please select from 1 of the following {len(self.valid_strategies)} strategies: {self.valid_strategies}")
+        self.hparams.feature_extractor_strategy = feature_extractor_strategy
+        if self._verbose: print(f"Set current model training strategy to: {self.hparams.feature_extractor_strategy}")
+            
+        
+        if finetuning_strategy == "finetuning_unfreeze_layers_on_plateau":
+            if "resnet" in self.hparams.backbone_name:
+                self.finetuning_milestones = ["layer4", "layer3", "layer2", "layer1"]
+            elif "efficient" in self.hparams.backbone_name:
+                self.finetuning_milestones = ['blocks.6', 'blocks.5', 'blocks.4', 'blocks.3', 'blocks.2', 'blocks.1', 'blocks.0']
+            else:
+                self.finetuning_milestones = None
+            if self._verbose: print(f"Set current model finetuning strategy to: {self.finetuning_milestones}")
+            
+#             self.feature_extractor_strategy(freeze_bn=False,
+#                                             eval_bn=False)
+
+        
+        
 
     
     def feature_extractor_strategy(self,
@@ -283,7 +304,7 @@ class LayerFreezeLightningPlugin:
         
         """
         self.freeze_backbone(freeze_bn=freeze_bn)
-        self._freeze_bn = freeze_bn
+        self.freeze_bn = freeze_bn
         self.eval_bn = eval_bn
         
         if not freeze_bn:
@@ -306,7 +327,7 @@ class LayerFreezeLightningPlugin:
         Sets the model to train during the val loop
         """
         self.train()
-        self.set_strategy(strategy=self.hparams.finetuning_strategy)
+        self.set_strategy(feature_extractor_strategy=self.hparams.feature_extractor_strategy)
 
     
     
@@ -502,9 +523,13 @@ class LightningMetricsPlugin:
                                        "per_class":self.metrics_val_per_class}
             
         if stage in ['test', 'all']:
-            prefix=f'{tag}_test'.strip("_")
+            if isinstance(tag, str):
+                prefix=tag
+            else:
+                prefix = "test"
+#             prefix=f'{tag}_test'.strip("_")
             self.metrics_test = get_scalar_metrics(num_classes=self.num_classes, average='macro', prefix=prefix)
-            self.metrics_test_per_class = get_per_class_metrics(num_classes=self.num_classes, prefix='test')
+            self.metrics_test_per_class = get_per_class_metrics(num_classes=self.num_classes, prefix=prefix)
             self.all_metrics['test'] = {"scalar":self.metrics_test,
                                         "per_class":self.metrics_test_per_class}
             
@@ -625,6 +650,7 @@ class BaseLightningModule(LightningMetricsPlugin,
                        "test_loss": loss},
                       on_step=False, on_epoch=True,
                       prog_bar=True, logger=True)
+        self.log_metric_step(stage="test")
         return {"loss":loss,
                 "y_logit":y_logit,
                 "y_pred":y_pred,
@@ -661,9 +687,10 @@ class LightningClassifier(BaseLightningModule):
                  dropout_p: Optional[float]=0.3,
                  lr: float=2e-03,
                  backbone_lr_mult: float=0.1,
-                 finetuning_strategy: str="feature_extractor",
+                 feature_extractor_strategy: str="feature_extractor",
+                 finetuning_strategy: str=None,
                  weight_decay: float=0.01,
-                 
+                 scheduler_config: Dict[str,Any]=None,
                  seed: int=None,
                  **kwargs):
         super().__init__(seed=seed)
@@ -677,11 +704,14 @@ class LightningClassifier(BaseLightningModule):
                                       head_type=head_type,
                                       hidden_size=hidden_size,
                                       dropout_p=dropout_p)
-        
-        self.set_strategy(strategy=finetuning_strategy)
+        print(f"self.hparams: {self.hparams}")
+        print(f"feature_extractor_strategy: {feature_extractor_strategy}")
+        self.set_strategy(feature_extractor_strategy=feature_extractor_strategy,
+                          finetuning_strategy=finetuning_strategy)
     
         self.criterion = nn.CrossEntropyLoss()
         self.metrics = self.init_metrics(stage='all')
+    
     
     def forward(self,x):
         return self.model(x)
@@ -697,8 +727,65 @@ class LightningClassifier(BaseLightningModule):
     
     def configure_optimizers(self):
         print(f"self.hparams={self.hparams}")
-        self.optimizer = torch.optim.AdamW([{"params":self.model.backbone.parameters(), "lr":self.get_lr("backbone"), "weight_decay": self.hparams.weight_decay},
-                                            {"params":self.model.head.parameters(), "lr":self.get_lr("head"), "weight_decay": self.hparams.weight_decay}])
-#         self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=self.config.t_max, eta_min=self.config.min_lr)
+        self.optimizers = [torch.optim.AdamW([{"params":self.model.backbone.parameters(), "lr":self.get_lr("backbone"), "weight_decay": self.hparams.weight_decay},
+                                            {"params":self.model.head.parameters(), "lr":self.get_lr("head"), "weight_decay": self.hparams.weight_decay}])]
+#         self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizers, T_max=self.config.t_max, eta_min=self.config.min_lr)
+        self.schedulers = configure_schedulers(optimizer=self.optimizers[0],
+                                               config=self.hparams.get("scheduler_config",{}))
+    
+        return self.optimizers, self.schedulers
+    
+#         return {'optimizer': self.optimizer,
+#                 'scheduler': self.scheduler}
 
-        return {'optimizer': self.optimizer}
+    @classmethod
+    def init_pretrained_backbone_w_new_classifier(cls,
+                                                  ckpt_path: str,
+                                                  new_num_classes: int,
+                                                  **kwargs):
+        kwargs["num_classes"] = new_num_classes
+        model = cls(**kwargs)
+        ckpt = torch.load(ckpt_path)
+        state_dict = {}
+#         if "metadata" in ckpt:
+#             state_dict["metadata"] = ckpt["metadata"]
+        if "state_dict" in ckpt:
+            state_dict = ckpt["state_dict"]
+        else:
+            state_dict = ckpt
+            
+        backbone_state_dict = OrderedDict({})
+        for k,v in state_dict.items():
+            if k.startswith("model."):
+                k = k.split("model.")[-1]
+            if k.startswith("backbone."):
+                k = k.split("backbone.")[-1]
+            backbone_state_dict[k] = v
+
+            
+        missed_keys = model.model.backbone.load_state_dict(backbone_state_dict, strict=False)
+        print(f"missed_keys: {missed_keys}")
+
+        return model
+    
+    
+    
+    def save_backbone_weights(self,
+                              ckpt_dir: str,
+                              ckpt_filename: str="backbone.ckpt",
+                              metadata: Optional[Dict[str, Any]]=None,
+                              verbose: bool=True):
+        state_dict = {"state_dict": self.model.model.backbone.state_dict()}
+        if isinstance(metadata, dict):
+            state_dict["metadata"] = metadata
+        
+        ckpt_path = os.path.join(ckpt_dir, ckpt_filename)
+        torch.save(state_dict, ckpt_path)
+        
+        if verbose and os.path.isfile(ckpt_path):
+            print(f"Saved backbone state_dict to disk at: {ckpt_path}")
+            
+        if not os.path.isfile(ckpt_path):
+            print(f"[WARNING] Error saving model backbone to {ckpt_path} ")
+            
+        return ckpt_path

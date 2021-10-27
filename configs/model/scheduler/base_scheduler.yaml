@@ -1,0 +1,10 @@
+
+
+_target_: null
+
+interval: "epoch"
+# false for no scheduler
+scheduler_type: false
+
+warmup_steps: 5
+total_steps: ${trainer.max_epochs}

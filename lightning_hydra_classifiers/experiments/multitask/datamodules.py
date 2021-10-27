@@ -155,6 +155,7 @@ class MultiTaskDataModule(pl.LightningDataModule):
                           batch_size=self.batch_size,
                           pin_memory=self.pin_memory,
                           num_workers=self.num_workers,
+                          shuffle=False,
                           drop_last=False)
     
     def test_dataloader(self):
@@ -162,6 +163,7 @@ class MultiTaskDataModule(pl.LightningDataModule):
                           batch_size=self.batch_size,
                           pin_memory=self.pin_memory,
                           num_workers=self.num_workers,
+                          shuffle=False,
                           drop_last=False)
 
 
