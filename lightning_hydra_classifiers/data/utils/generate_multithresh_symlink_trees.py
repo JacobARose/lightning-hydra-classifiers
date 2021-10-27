@@ -286,7 +286,7 @@ def filter_rare_classes_and_create_symlinks(data: pd.DataFrame,
 
 # python "/media/data/jacob/GitHub/lightning-hydra-classifiers/lightning_hydra_classifiers/data/utils/generate_multithresh_symlink_trees.py" --dry-run --resolution 512 1024 1536 2048 --dataset_name General_Fossil Florissant_Fossil --num_workers 8
 
-
+# python "/media/data/jacob/GitHub/lightning-hydra-classifiers/lightning_hydra_classifiers/data/utils/generate_multithresh_symlink_trees.py" --task clean -r 512 --dataset_name Florissant_Fossil --dry-run
         
 def cmdline_args(args=""):
     p = argparse.ArgumentParser(description="Produce symlink trees from source dataset, or clean them up.")
@@ -298,8 +298,7 @@ def cmdline_args(args=""):
                    help="Resolution(s) to build symlinks from, images should be resized to (3, res, res).")
     p.add_argument("-d", "--root_dir", dest="root_dir", type=str,
                    default="/media/data_cifs/projects/prj_fossils/data/processed_data/leavesdb-v1_0/images",
-                   help="""Destination image root dir. Script will expect source images to exist in class-wise subdirs in ".{dataset_name}/original/full/jpg". Then, for creating the target images
-                   it will create subdirs ".{dataset_name}/{resolution}/{threshold}/jpg" for user-input threshold value.""")
+                   help="""Destination image root dir. Script will expect source images to exist in class-wise subdirs in ".{dataset_name}/original/full/jpg". Then, for creating the target images it will create subdirs ".{dataset_name}/{resolution}/{threshold}/jpg" for user-input threshold value.""")
     p.add_argument("-a", "--run-all", dest="run_all", action="store_true",
                    help="Overrides any values provided to --dataset_name. Flag for when user would like to run through all default threshold arguments on all datasets. Currently available: ['Extant_Leaves', 'Florissant_Fossil', 'General_Fossil'].")
     p.add_argument("--num_workers", dest="num_workers", type=int, default=16,
