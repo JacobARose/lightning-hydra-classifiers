@@ -18,6 +18,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import wandb
 from rich import print as pp
+from typing import *
+
 
 from lightning_hydra_classifiers.utils.dataset_management_utils import Extract
 from lightning_hydra_classifiers.utils.template_utils import get_logger
@@ -49,7 +51,8 @@ def run_lr_tuner(trainer: pl.Trainer,
                  config: argparse.Namespace,
                  results_dir: str,
                  group: str=None,
-                 strict_resume: bool=False):
+                 run: Optional=None):
+                 # strict_resume: bool=False):
 #                  run=None):
     """
     Learning rate tuner
@@ -87,7 +90,6 @@ def run_lr_tuner(trainer: pl.Trainer,
         if os.path.isfile(results_path):
             results = Extract.df_from_csv(results_path)
         
-        
         best_lr = best_hparams['lr']
         if hasattr(model, "config"):
             model.config.lr = best_lr
@@ -110,19 +112,17 @@ def run_lr_tuner(trainer: pl.Trainer,
                       "loss": None}
         return suggestion, results, config
     
-        
-    with wandb.init(job_type = "lr_tune",
-                    config=cfg,
-                    group=group,
-                    reinit=True) as run:
+    if run is None:
+        run = wandb.init(job_type = "lr_tune",
+                         config=cfg,
+                         group=group,
+                         reinit=True)
         logger.info(f"[Initiating Stage] lr_tuner")
-    
         lr_tuner = trainer.tuner.lr_find(model,
                                          datamodule,
-                                         **cfg["pretrain"])
+                                         **cfg.get("pretrain", {}))
         lr_tuner_results = lr_tuner.results
         best_lr = lr_tuner.suggestion()
-    
         suggestion = {"lr": best_lr,
                       "loss":lr_tuner_results['loss'][lr_tuner._optimal_idx]}
         

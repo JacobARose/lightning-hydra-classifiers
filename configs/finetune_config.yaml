@@ -10,7 +10,10 @@ defaults:
     - system: multi_task_file_system
     - pretrain: default
     - _self_
-    - experiment: null
+    - experiment: finetune_imagenet_model_on_new_dataset 
+    #null
+    # - sweeps: null
+    # - sweeps: base_sweep
 
 #     - tuner: default_tuner.yaml
 #     - experiment: null
@@ -19,7 +22,43 @@ defaults:
 #     - override hydra/hydra_logging: colorlog
 #     - override hydra/job_logging: colorlog
 task_id: 1
-run_trial: "train"
+run_trial: "train_classifier"
+model:
+    ckpt_path: "official" # "official" -> use default library pretrained weights automatically.
+    ckpt_dir: '${checkpoint_dir}'
+    ckpt_mode: "pretrained_model_checkpoint"
+    
+    
+hparams_log_path: '${results_dir}/hparams/best_hparams.yaml'
+hparams:
+    batch_size: '${data.batch_size}' # 256 # 8 #'default' #null
+    lr: 2e-03 #'default' #null # base learning rate
+    num_classes: '${model.heads.num_classes}'
+    classes: null
+    class_type: "family"
+    image_size: '${data.image_size}'
+    dataset_name: "Extant"
+    task_id: '${task_id}'
+    backbone_name: '${model.backbone.backbone_name}'
+    
+# experiment dir structure
+# root_dir:
+#     experiment_dir:
+#         replicate_1:
+#             results_dir:
+#             checkpoint_dir:
+# ...
+#         replicate_n-1:
+#             results_dir:
+#             checkpoint_dir:
+
+
+trainer:
+    gpus: 1
+    #'[${hydra:job.num}]'
+
+
+
 
 
 dataset_name: '${data.dataset_name}'
@@ -30,17 +69,14 @@ feature_extractor_strategy: '${model.feature_extractor_strategy}'
 
 root_dir: "/media/data_cifs/projects/prj_fossils/users/jacob/experiments/July2021-Nov2021/experiment_logs/Transfer_Experiments/finetune_trials"
 
-# replicate: '${system.replicate}'
-# experiment_name: '${data.experiment.experiment_name}-${model.backbone_name}-${data.dataset_name}-${model.num_classes}_classes-res_${data.image_size}-bsz_${data.batch_size}-pretrained_${model.pretrained}-pool_${model.pool_type}"
 # experiment_dir: '${root_dir}/${experiment_name}/replicate_${replicate}'
 # results_dir: '${experiment_dir}/results'
 # checkpoint_dir: '${experiment_dir}/checkpoints'
 replicate: '${system.replicate}'
-experiment_name: "${data.experiment.experiment_name}-${model.backbone_name}-${data.dataset_name}-${model.num_classes}_classes-res_${data.image_size}-bsz_${data.batch_size}-pretrained_${model.backbone.pretrained}-pool_${model.heads.pool_type}-dropout_p_${model.heads.dropout_p}-l2_wd_{model.optimizer.weight_decay}"
+experiment_name: "${data.experiment.experiment_name}-${model.backbone_name}-${data.dataset_name}-${model.num_classes}_n_cls-res_${data.image_size}-bsz_${data.batch_size}-pretrained_${model.backbone.pretrained}-pool_${model.heads.pool_type}-dropout_p_${model.heads.dropout_p}" #-l2_wd_${model.optimizer.weight_decay}"
 experiment_dir: '${root_dir}/${experiment_name}/task_${task_id}/replicate_${replicate}'
 results_dir: '${experiment_dir}/results'
 checkpoint_dir: '${experiment_dir}/checkpoints'
-
 
 
 
@@ -53,17 +89,21 @@ disable_warnings: True
 
 
 
-
 hydra:
     run:
-        dir: hydra-logs/runs/${now:%Y-%m-%d}/${now:%H-%M-%S}
-    sweep:
-        dir: hydra-logs/multiruns/${now:%Y-%m-%d_%H-%M-%S}
-        subdir: ${hydra.job.num}
-
+        dir: 'hydra-logs/${hydra.job.override_dirname}/seed=${seed}'
     job:
-        env_set:
-            # currently there are some issues with running sweeps alongside wandb
-            # https://github.com/wandb/client/issues/1314
-            # this env var fixes that
-            WANDB_START_METHOD: thread
+        config:
+            override_dirname:
+                exclude_keys:
+                    - "seed"
+        # env_set:
+        #     # CUDA_VISIBLE_DEVICES: ${hydra.job.num}
+        #     # currently there are some issues with running sweeps alongside wandb
+        #     # https://github.com/wandb/client/issues/1314
+        #     # this env var fixes that
+        #     WANDB_START_METHOD: "thread"
+
+    # sweep:
+    #     dir: hydra-logs/multiruns/${now:%Y-%m-%d_%H-%M-%S}
+    #     subdir: ${hydra.job.num}

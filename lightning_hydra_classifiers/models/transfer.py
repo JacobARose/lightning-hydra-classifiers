@@ -731,7 +731,7 @@ class LightningClassifier(BaseLightningModule):
                                             {"params":self.model.head.parameters(), "lr":self.get_lr("head"), "weight_decay": self.hparams.weight_decay}])]
 #         self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizers, T_max=self.config.t_max, eta_min=self.config.min_lr)
         self.schedulers = configure_schedulers(optimizer=self.optimizers[0],
-                                               config=self.hparams.get("scheduler_config",{}))
+                                               config=self.hparams.get("scheduler",{}))
     
         return self.optimizers, self.schedulers
     
@@ -741,9 +741,15 @@ class LightningClassifier(BaseLightningModule):
     @classmethod
     def init_pretrained_backbone_w_new_classifier(cls,
                                                   ckpt_path: str,
-                                                  new_num_classes: int,
+                                                  new_num_classes: Optional[int]=None,
                                                   **kwargs):
-        kwargs["num_classes"] = new_num_classes
+        """
+        Create a new instance of this LightningClassifier with:
+            - backbone weights pretrained on a custom dataset (like Extant_Leaves)
+            - classifier weights randomly initialized
+        """
+        if isinstance(new_num_classes, int):
+            kwargs["num_classes"] = new_num_classes
         model = cls(**kwargs)
         ckpt = torch.load(ckpt_path)
         state_dict = {}
@@ -762,12 +768,10 @@ class LightningClassifier(BaseLightningModule):
                 k = k.split("backbone.")[-1]
             backbone_state_dict[k] = v
 
-            
         missed_keys = model.model.backbone.load_state_dict(backbone_state_dict, strict=False)
         print(f"missed_keys: {missed_keys}")
 
         return model
-    
     
     
     def save_backbone_weights(self,
@@ -775,6 +779,10 @@ class LightningClassifier(BaseLightningModule):
                               ckpt_filename: str="backbone.ckpt",
                               metadata: Optional[Dict[str, Any]]=None,
                               verbose: bool=True):
+        """
+        Save the weights from this model's backbone to ${ckpt_dir}/${ckpt_filename}
+        """
+        
         state_dict = {"state_dict": self.model.model.backbone.state_dict()}
         if isinstance(metadata, dict):
             state_dict["metadata"] = metadata
@@ -789,3 +797,82 @@ class LightningClassifier(BaseLightningModule):
             print(f"[WARNING] Error saving model backbone to {ckpt_path} ")
             
         return ckpt_path
+
+    
+    def save_model_checkpoint(ckpt_dir: str,
+                              ckpt_filename: str="model.ckpt",
+                              metadata: Optional[Dict[str, Any]]=None,
+                              verbose: bool=True):
+        """
+        Save the weights from this model's backbone & classifier head to ${ckpt_dir}/${ckpt_filename}
+        
+        state_dict should have top level keys: 
+        - model.backbone
+        - model.classifier
+        
+        """
+        
+        state_dict = {"state_dict": self.model.model.state_dict()}
+        if isinstance(metadata, dict):
+            state_dict["metadata"] = metadata
+        if hasattr(self, "label_encoder"):
+            state_dict["label_encoder"] = self.label_encoder
+        ckpt_path = os.path.join(ckpt_dir, ckpt_filename)
+        torch.save(state_dict, ckpt_path)
+        
+        if verbose and os.path.isfile(ckpt_path):
+            print(f"Saved backbone state_dict to disk at: {ckpt_path}")
+            
+        if not os.path.isfile(ckpt_path):
+            print(f"[WARNING] Error saving model backbone to {ckpt_path} ")
+            
+        return ckpt_path
+    
+    
+    @classmethod
+    def load_model_from_checkpoint(cls,
+                                   ckpt_path: str,
+                                   **kwargs):    
+        """
+        Create a new instance of this LightningClassifier with:
+            - backbone & classifier weights pretrained on a custom dataset (like Extant_Leaves)
+
+        """
+        model = cls(**kwargs)
+        ckpt = torch.load(ckpt_path)
+        state_dict = {}
+        
+        if "label_encoder" in ckpt:
+            self.label_encoder = ckpt["label_encoder"]
+        if "state_dict" in ckpt:
+            state_dict = ckpt["state_dict"]
+        else:
+            state_dict = ckpt
+            
+        backbone_state_dict = OrderedDict({})
+        for k,v in state_dict.items():
+            if k.startswith("model.model."):
+                k = k.split("model.")[-1]
+            backbone_state_dict[k] = v
+
+        missed_keys = model.model.load_state_dict(backbone_state_dict, strict=False)
+        print(f"missed_keys: {missed_keys}")
+
+        return model ##, missed_keys
+    
+    
+    
+#         state_dict = {"state_dict": self.model.model.state_dict()}
+#         if isinstance(metadata, dict):
+#             state_dict["metadata"] = metadata
+        
+#         ckpt_path = os.path.join(ckpt_dir, ckpt_filename)
+#         torch.save(state_dict, ckpt_path)
+        
+#         if verbose and os.path.isfile(ckpt_path):
+#             print(f"Saved backbone state_dict to disk at: {ckpt_path}")
+            
+#         if not os.path.isfile(ckpt_path):
+#             print(f"[WARNING] Error saving model backbone to {ckpt_path} ")
+            
+#         return ckpt_path

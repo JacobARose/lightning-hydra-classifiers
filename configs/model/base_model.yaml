@@ -14,7 +14,11 @@ defaults:
 feature_extractor_strategy: "feature_extractor_+_except_bn"
 finetuning_strategy: "finetuning_unfreeze_layers_on_plateau"
 
+
 backbone_lr_mult: 0.1
 backbone_name: "${model.backbone.backbone_name}"
 num_classes: null
+
 ckpt_path: null
+ckpt_dir: null
+ckpt_mode: null

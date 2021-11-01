@@ -8,5 +8,5 @@
 _target_: lightning_hydra_classifiers.callbacks.finetuning_callbacks.FinetuningLightningCallback
 monitor: "val_acc"
 mode: "max"
-patience: 2
-init_patience: 2
+patience: 8
+init_patience: 4

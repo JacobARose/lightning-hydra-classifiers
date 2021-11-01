@@ -1,7 +1,8 @@
 _target_: pytorch_lightning.Trainer
 
 # set `1` to train on GPU, `0` to train on CPU only
-gpus: 1
+gpus: '1'
+auto_select_gpus: true
 
 min_epochs: 1
 max_epochs: 40
@@ -13,7 +14,7 @@ profiler: "simple"
 # log_every_n_steps: 50 
 
 # fast_dev_run: false
-# limit_train_batches: 1.0
+limit_train_batches: 1.0
 # limit_val_batches: 1.0
 # limit_test_batches: 1.0
 # auto_scale_batch_size: False

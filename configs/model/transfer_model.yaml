@@ -1,0 +1,30 @@
+
+# transfer_model.yaml
+
+defaults:
+    - base_model
+    - override multitask: null
+    
+# pool_type: "avg"
+# backbone:
+#     global_pool_type: ${..pool_type}
+feature_extractor_strategy: "feature_extractor_+_except_bn"
+finetuning_strategy: "finetuning_unfreeze_layers_on_plateau"
+
+
+backbone_lr_mult: 0.1
+backbone_name: '${model.backbone.backbone_name}'
+pretrained: '${model.backbone.pretrained}'
+num_classes: null
+
+pool_type: '${model.heads.pool_type}'
+head_type: '${model.heads.head_type}'
+hidden_size: '${model.heads.hidden_size}'
+dropout_p: '${model.heads.dropout_p}'
+lr: '${model.optimizer.lr}'
+weight_decay: '${model.optimizer.weight_decay}'
+seed: '${seed}'
+
+ckpt_path: null
+ckpt_dir: null
+ckpt_mode: null

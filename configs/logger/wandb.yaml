@@ -6,6 +6,7 @@ wandb:
     project: "image_classification"
     job_type: "train"
     group: "${model.backbone.backbone_name}_${data.experiment.experiment_name}"
+    log_model: true
 #     dir: '${results_dir}/logs'
     
     

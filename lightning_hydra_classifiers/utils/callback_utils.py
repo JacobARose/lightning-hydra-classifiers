@@ -262,10 +262,18 @@ class LogF1PrecRecHeatmap(pl.Callback):
 
 
 class ImagePredictionLogger(pl.Callback):
-    def __init__(self, top_k_per_batch: int=5, bottom_k_per_batch: int=5):
+    
+    """
+    To do: Switch to a running stack of top k or bottom k samples seen since the start of each epoch
+    """
+    def __init__(self, 
+                 top_k_per_batch: int=5,
+                 bottom_k_per_batch: int=5,
+                 frequency: int=50):
         super().__init__()
         self.top_k_per_batch = top_k_per_batch
         self.bottom_k_per_batch = bottom_k_per_batch
+        self.frequency = frequency
 #         self.num_samples = num_samples
 #         self.val_imgs, self.val_labels = val_samples['image'], val_samples['target']
 
@@ -279,10 +287,10 @@ class ImagePredictionLogger(pl.Callback):
     def on_validation_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx):
         if ("loss" not in outputs) or self._sanity_check:
             return
+        if batch_idx % self.frequency != 0:
+            return
         
         y_true = batch[1]
-#         loss = nn.CrossEntropyLoss(reduction="none")(outputs["y_logit"], y_true).cpu().numpy()
-        
         loss = nn.CrossEntropyLoss(reduction="none")(outputs["y_logit"], y_true).cpu().numpy()        
         
     

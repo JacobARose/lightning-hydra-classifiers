@@ -1,7 +1,8 @@
 
 
 defaults:
-    - base_model
-    - override backbone: resnet50
-    - override optimizer: AdamW
-    - override multitask: default
+    # - base_model
+    - transfer_model
+    # - override backbone: resnet50
+    # - override optimizer: AdamW
+    # - override multitask: null #default

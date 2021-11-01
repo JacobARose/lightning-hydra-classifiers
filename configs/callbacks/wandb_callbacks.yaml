@@ -20,8 +20,9 @@ log_per_class_metrics_to_wandb:
 
 image_prediction_logger:
     _target_: lightning_hydra_classifiers.utils.callback_utils.ImagePredictionLogger
-    top_k_per_batch: 5
-    bottom_k_per_batch: 5
+    top_k_per_batch: 3
+    bottom_k_per_batch: 3
+    frequency: 50
 
 
 watch_model_with_wandb:
@@ -30,10 +31,13 @@ watch_model_with_wandb:
     log_freq: 100
 
 
-uploadaheckpointsasartifact:
+uploadcheckpointsasartifact:
     _target_: lightning_hydra_classifiers.utils.logging_utils.UploadCheckpointsAsArtifact
     ckpt_dir: '${checkpoint_dir}'
-    upload_best_only: false
+    upload_best_only: true
+
+module_data_monitor:
+    _target_: pl_bolts.callbacks.ModuleDataMonitor
 
 
 # log_f1_prec_rec_heat_map:
@@ -70,6 +74,4 @@ uploadaheckpointsasartifact:
 #     verbose: false
 #     mode: "min"
 
-module_data_monitor:
-    _target_: pl_bolts.callbacks.ModuleDataMonitor
 

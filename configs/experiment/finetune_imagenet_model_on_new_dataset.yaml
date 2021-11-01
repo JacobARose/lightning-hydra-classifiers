@@ -1,0 +1,91 @@
+# @package _global_
+
+# python run.py +experiment=finetune_imagenet_model_on_new_dataset
+
+# finetune_imagenet_model_on_new_dataset.yaml
+
+defaults:
+#     - override /logger: many_loggers.yaml
+    - override /hydra/hydra_logging: colorlog
+    - override /hydra/job_logging: colorlog
+
+callbacks:
+    finetuning_lightning_callback:
+        _target_: lightning_hydra_classifiers.callbacks.finetuning_callbacks.FinetuningLightningCallback
+        monitor: "val_acc"
+        mode: "max"
+        # patience: 2
+        # init_patience: 2
+
+# run_trial: "finetune_imagenet_model_on_new_dataset"
+# run_trial: "finetune_new_classifier"
+# run_trial: "train"
+run_trial: "train_classifier"
+task_id: 0
+
+source:
+    data:
+        dataset_name: "imagenet"
+        task_id: null
+    model:
+        backbone_ckpt_path: null
+    results_filepath: null
+
+model:
+    backbone:
+        pretrained: true
+    optimizer:
+        lr: 1e-03
+        weight_decay: 0.0001
+        
+    feature_extractor_strategy: "feature_extractor_+_except_bn"
+    finetuning_strategy: "finetuning_unfreeze_layers_on_plateau"
+    backbone_lr_mult: 0.1
+        
+    ckpt_path: "official" # "official" -> use default library pretrained weights automatically.
+    ckpt_dir: '${checkpoint_dir}'
+    ckpt_mode: "pretrained_model_from_imagenet"
+
+experiment_dir: '${root_dir}/${experiment_name}/task_${task_id}/source_task_imagenet/replicate_${replicate}'
+
+
+# hparams_log_path: '${results_dir}/hparams/best_hparams.yaml'
+# hparams:
+#     batch_size: '${data.batch_size}' # 256 # 8 #'default' #null
+#     lr: 2e-03 #'default' #null # base learning rate
+#     num_classes: ${model.heads.num_classes}
+#     classes: null
+#     class_type: "family"
+#     image_size: {data.image_size}
+#     dataset_name: "Extant"
+#     backbone_name: ${model.backbone.backbone_name}
+##################################
+##################################
+
+
+
+# trainer:
+#     gradient_clip_val: 0.5
+#     accumulate_grad_batches: 2
+#     weights_summary: null
+    # resume_from_checkpoint: ${work_dir}/last.ckpt
+
+
+logger:
+    wandb:
+        tags: ['imagenet-pretrained', 'finetuned-on-${hparams.dataset_name}', '${hparams.backbone_name}', 'replicate-${replicate}', '${run_trial}']
+        notes: "Description of this model."
+#     neptune:
+#         tags: ["best_model"]
+#     csv_logger:
+#         save_dir: "."
+
+hydra:
+    run:
+        dir: "hydra-logs/${hydra.job.override_dirname}/seed=${seed}"
+    # job:
+    #     config:
+    #         override_dirname:
+    #             exclude_keys:
+    #                 - "seed"
+

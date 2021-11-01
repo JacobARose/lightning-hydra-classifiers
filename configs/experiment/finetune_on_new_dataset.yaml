@@ -14,30 +14,18 @@ callbacks:
         _target_: lightning_hydra_classifiers.callbacks.finetuning_callbacks.FinetuningLightningCallback
         monitor: "val_acc"
         mode: "max"
-        patience: 2
-        init_patience: 2
+        # patience: 2
+        # init_patience: 2
 
 
-run_trial: "finetune_new_classifier"
-# run_trial: "train"
+run_trial: "train_classifier"
 task_id: 1
-
 
 seed: 12345
 print_config: true
 
 experiment_dir: '${root_dir}/${experiment_name}/task_${task_id}/source_task_${source.data.task_id}/replicate_${replicate}'
 
-hparams_log_path: '${results_dir}/hparams/best_hparams.yaml'
-hparams:
-    batch_size: '${data.batch_size}' # 256 # 8 #'default' #null
-    lr: 2e-03 #'default' #null # base learning rate
-    num_classes: ${model.heads.num_classes}
-    classes: null
-    class_type: "family"
-    image_size: {data.image_size}
-    dataset_name: "PNAS"
-    backbone_name: ${model.backbone.backbone_name}
 ##################################
 ##################################
 
@@ -52,6 +40,8 @@ source:
 
 model:
     ckpt_path: '${source.model.backbone_ckpt_path}'
+    ckpt_dir: '${checkpoint_dir}'
+    ckpt_mode: "pretrained_backbone_w_new_classifier"
 
 # trainer:
 #     gradient_clip_val: 0.5
@@ -62,7 +52,7 @@ model:
 
 logger:
     wandb:
-        tags: ['${source.data.dataset_name}', '${hparams.dataset_name}', '${hparams.backbone_name}', '${run_trial}']
+        tags: '[${source.data.dataset_name}, ${hparams.dataset_name}, ${hparams.backbone_name}, ${run_trial}]'
         notes: "Description of this model."
 #     neptune:
 #         tags: ["best_model"]

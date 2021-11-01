@@ -12,17 +12,24 @@ defaults:
 
 
 # run_trial: "finetune_new_classifier"
-run_trial: "train"
+run_trial: "train_classifier"
 task_id: 0
 
 
 model:
     backbone:
         pretrained: false
+    optimizer:
+        lr: 0.1
+        weight_decay: 0.0001
         
     feature_extractor_strategy: null
     finetuning_strategy: null
     backbone_lr_mult: 1.0
+
+    ckpt_path: null # "official" -> use default library pretrained weights automatically.
+    ckpt_dir: ${checkpoint_dir}
+    ckpt_mode: "initialize_model_from_scratch"
 
 
 
@@ -31,35 +38,14 @@ seed: 12345
 print_config: true
 
 experiment_dir: '${root_dir}/${experiment_name}/task_${task_id}/init_from_scratch/replicate_${replicate}'
-
-hparams_log_path: '${results_dir}/hparams/best_hparams.yaml'
-hparams:
-    batch_size: '${data.batch_size}' # 256 # 8 #'default' #null
-    lr: null #2e-03 #'default' #null # base learning rate
-    num_classes: '${model.heads.num_classes}'
-    classes: null
-    class_type: "family"
-    image_size: '${data.image_size}'
-    dataset_name: "Extant-PNAS_family_3_512"
-    task_id: '${task_id}'
-    backbone_name: '${model.backbone.backbone_name}'
 ##################################
 ##################################
-
-# model:
-#     ckpt_path: '${source.model.backbone_ckpt_path}'
-
-# trainer:
-#     gradient_clip_val: 0.5
-#     accumulate_grad_batches: 2
-#     weights_summary: null
-    # resume_from_checkpoint: ${work_dir}/last.ckpt
 
 
 logger:
     wandb:
         tags: ['${hparams.dataset_name}','${hparams.backbone_name}', '${run_trial}', "init_from_scratch"]
-        notes: "randomly initialized ${model.backbone_name} trained on dataset: ${hparams.dataset_name}"
+        notes: '"randomly initialized" ${model.backbone_name} "trained on dataset:" ${hparams.dataset_name}'
 #     neptune:
 #         tags: ["best_model"]
 #     csv_logger:

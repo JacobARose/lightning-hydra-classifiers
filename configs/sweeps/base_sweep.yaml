@@ -1,0 +1,24 @@
+# @package _global_
+
+# defaults:
+    # - override \hydra/launcher: ray
+    # - override experiment: finetune_imagenet_model_on_new_dataset
+
+
+
+hydra:
+    # launcher: ray
+    run:
+        dir: 'hydra-logs/seed=${seed}'
+    job:
+        config:
+            override_dirname:
+                exclude_keys:
+                    - "seed"
+        # env_set:
+        #     CUDA_VISIBLE_DEVICES: 'str(${hydra.job.num})'
+
+                    
+    sweep:
+        dir: "hydra-logs/multiruns"
+        subdir: '${hydra.job.override_dirname}/seed=${seed}/${hydra.job.num}'

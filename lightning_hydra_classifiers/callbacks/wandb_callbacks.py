@@ -295,7 +295,8 @@ class LogPerClassMetricsToWandb(Callback):
 #             print(f"preds.shape={preds.shape}")
 #             print(f"targets.shape={targets.shape}")
             
-            self._log_classification_report(preds, targets, logger=wandb_logger)
+            # self._log_classification_report(preds, targets, logger=wandb_logger)
+        
 #             self._log_per_class_scores(preds, targets, logger=wandb_logger)
             self._log_confusion_matrix(preds, targets, logger=wandb_logger)
             wandb_logger.experiment.log({f"epoch": trainer.current_epoch})
@@ -323,9 +324,10 @@ class LogPerClassMetricsToWandb(Callback):
                                            zero_division=0,
                                            output_dict=True)
         
+        
+        # table = wandb.Table(data=[(label,
 
         sns.set_theme(context="talk")
-        
         fig, ax = plt.subplots(1,2, figsize=(18,30))
 
         sns.heatmap(pd.DataFrame(clf_report).iloc[:-1, :].T, annot=True, annot_kws={"fontsize":6}, ax=ax[0])
