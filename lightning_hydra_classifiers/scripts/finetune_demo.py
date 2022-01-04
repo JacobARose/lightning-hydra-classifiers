@@ -11,11 +11,6 @@ import numpy as np
 import os
 from pathlib import Path
 
-# import logging
-from lightning_hydra_classifiers.utils.template_utils import get_logger
-# logger = logging.Logger(__name__)
-logger = get_logger(__name__)
-logger.setLevel("DEBUG") # ('INFO')
 from tqdm.auto import tqdm, trange
 import torch
 import torch.nn as nn
@@ -25,133 +20,21 @@ import hydra
 from omegaconf import OmegaConf, DictConfig
 from collections import OrderedDict
 from typing import *
-
-# from lightning_hydra_classifiers.models.transfer import *
-from rich import print as pp
 import pytorch_lightning as pl
-from lightning_hydra_classifiers.scripts.multitask.train import load_data, resolve_config, configure_callbacks, configure_loggers
+# from lightning_hydra_classifiers.scripts.multitask.train import load_data, resolve_config, configure_callbacks, configure_loggers
+from lightning_hydra_classifiers.utils.experiment_utils import load_data, resolve_config, configure_callbacks, configure_loggers, configure_trainer
 from lightning_hydra_classifiers.utils.etl_utils import ETL
 from lightning_hydra_classifiers.scripts.pretrain import lr_tuner
+from lightning_hydra_classifiers.utils.ckpt_utils import scan_ckpt_dir, load_results_if_previously_completed, build_model_or_load_from_checkpoint
+from lightning_hydra_classifiers.utils.template_utils import get_logger
+logger = get_logger(__name__)
+logger.setLevel("DEBUG") # ('INFO')
+
 # source: https://uvadlc-notebooks.readthedocs.io/en/latest/tutorial_notebooks/tutorial5/Inception_ResNet_DenseNet.html
-from lightning_hydra_classifiers.callbacks.finetuning_callbacks import FinetuningLightningCallback
+# from lightning_hydra_classifiers.callbacks.finetuning_callbacks import FinetuningLightningCallback
 from lightning_hydra_classifiers.models.transfer import LightningClassifier
 
 
-
-def lightning_checkpoint_connector(ckpt_path: Optional[str]=None,
-                                   **kwargs) -> Optional[LightningClassifier]:
-    # pretrained_filename = config.trainer.resume_from_checkpoint #config.checkpoint_dir
-    if os.path.isfile(str(ckpt_path)):
-        print(f"Found pretrained lightning checkpoint model at {ckpt_path}, loading...")
-        return LightningClassifier.load_from_checkpoint(ckpt_path, **kwargs) # Automatically loads the model with the saved hyperparameters
-    
-
-def pretrained_model_checkpoint_connector(ckpt_path: Optional[str]=None,
-                                          **kwargs) -> Optional[LightningClassifier]:
-    if os.path.isfile(str(ckpt_path)):
-        print(f"Found pretrained custom model checkpoint at {ckpt_path}, loading...")
-        return LightningClassifier.load_model_from_checkpoint(ckpt_path, **kwargs)
-
-
-def initialize_model_from_scratch_connector(**kwargs) -> Optional[LightningClassifier]:
-    return LightningClassifier(**kwargs)
-        # model.label_encoder = datamodule.label_encoder
-
-def pretrained_model_from_imagenet_connector(**kwargs) -> Optional[LightningClassifier]:
-    return LightningClassifier(**kwargs)
-
-
-def pretrained_backbone_w_new_classifier_connector(ckpt_path: Optional[str]=None,
-                                                   new_num_classes: Optional[int]=None,
-                                                  **kwargs) -> Optional[LightningClassifier]:
-    return LightningClassifier.init_pretrained_backbone_w_new_classifier(ckpt_path,
-                                                                         new_num_classes=new_num_classes,
-                                                                         **kwargs)
-    
-    
-CKPT_MODES = {"lightning_checkpoint":lightning_checkpoint_connector,
-              "pretrained_model_checkpoint":pretrained_model_checkpoint_connector,
-              "pretrained_backbone_w_new_classifier":pretrained_backbone_w_new_classifier_connector,
-              "initialize_model_from_scratch":initialize_model_from_scratch_connector,
-              "pretrained_model_from_imagenet":pretrained_model_from_imagenet_connector}
-    
-    
-def build_model_or_load_from_checkpoint(ckpt_path: Optional[str]=None,
-                                        ckpt_dir: Optional[str]=None,
-                                        ckpt_mode: Optional[str]=None,
-                                        config=None) -> Optional[LightningClassifier]:
-    
-    if os.path.isdir(str(ckpt_dir)) and (not os.path.isfile(str(ckpt_path))):
-        ckpt_paths, ckpt_path = scan_ckpt_dir(ckpt_dir)
-    config.model.update({"ckpt_path":ckpt_path})
-    if ckpt_mode in CKPT_MODES:
-        try:
-            model = CKPT_MODES[ckpt_mode](#ckpt_path=ckpt_path,
-                                          **config.model)
-        except Exception as e:
-            print(e, f"Chosen ckpt_mode={ckpt_mode} did not work, cycling through other options.")
-            
-    else:
-        for ckpt_mode in CKPT_MODES:
-            try:
-                model = CKPT_MODES[ckpt_mode](#ckpt_path=ckpt_path,
-                                              **config.model)
-            except Exception as e:
-                print(e, f"Chosen ckpt_mode={ckpt_mode} did not work, cycling through remaining options.")
-                
-    return model
-    #     model = LightningClassifier(**config.model, **kwargs)
-    #     model.label_encoder = datamodule.label_encoder
-
-    
-    
-def load_results_if_previously_completed(config) -> Optional[DictConfig]:
-    """
-    Checks if a results.yaml file has previously been saved in order to circumvent previously completed trials.
-    """
-    if os.path.isfile(os.path.join(config.results_dir, "results.yaml")):
-        results_file_path = os.path.join(config.results_dir, "results.yaml")
-        results = OmegaConf.load(results_file_path)
-        print(f"Found pre-existing results saved to file: {results_file_path}")
-        print(f"Results:"); pp(results)
-        return results
-    
-    results_file_path = str(config.source.get("results_filepath"))
-    if os.path.isfile(results_file_path):
-        results = OmegaConf.load(results_file_path)
-        print(f"Found results from source training stage saved to file: {results_file_path}")
-        print(f"Results:"); pp(results)
-        return results
-        
-    
-    
-
-def configure_trainer(config,
-                      callbacks=None,
-                      logger=None) -> pl.Trainer:
-    
-    ckpt_paths = [os.path.join(config.checkpoint_dir, ckpt) for ckpt in os.listdir(config.checkpoint_dir)]
-    if len(ckpt_paths) and os.path.exists(ckpt_paths[-1]):
-        print(f"Found {ckpt_paths[-1]}")
-        config.resume_from_checkpoint = ckpt_paths[-1]
-    
-    trainer_config = resolve_config(config.trainer)
-    trainer_config['callbacks'] = callbacks
-    trainer_config['logger'] = logger
-    trainer: pl.Trainer = hydra.utils.instantiate(trainer_config)
-    return trainer
-
-
-
-def scan_ckpt_dir(ckpt_dir):
-    # config.checkpoint_dir
-    # print(f"task_{task_id}: dataset_name={datamodule.dataset_names[f'task_{task_id}']}")
-    ckpt_paths = [os.path.join(ckpt_dir, ckpt) for ckpt in os.listdir(ckpt_dir)]
-    if len(ckpt_paths):
-        print(f"Found {len(ckpt_paths)} ckpts:" + "\n" + f"{ckpt_paths}")
-        last_ckpt = ckpt_paths[-1]
-        return ckpt_paths, last_ckpt
-    return ckpt_paths, None
 
 
 def get_config(config=None,
@@ -182,24 +65,6 @@ def get_config_and_load_data(config=None,
                            task_id=config.get("task_id", 0))
     print(f"datamodule.num_classes={datamodule.num_classes}")
     config.model.update({"num_classes":datamodule.num_classes})
-    # model_config = OmegaConf.create(dict(
-    #                                 backbone=config.model.get("backbone"), #{"backbone_name":config.model.backbone.backbone_name},
-    #                                 heads=config.model.get("heads"),
-    #                                 scheduler_config=config.model.get("scheduler"),
-    #                                 backbone_name=config.model.backbone.backbone_name,
-    #                                 pretrained=config.model.backbone.pretrained,
-    #                                 num_classes=datamodule.num_classes,
-    #                                 pool_type=config.model.heads.get("pool_type", "avg"),
-    #                                 head_type=config.model.heads.get("head_type", 'linear'),
-    #                                 hidden_size=config.model.heads.get("hidden_size", None),
-    #                                 dropout_p=config.model.heads.get("dropout_p", 0.0),
-    #                                 lr=2e-03,
-    #                                 backbone_lr_mult=config.model.get("backbone_lr_mult", 0.1),
-    #                                 feature_extractor_strategy=config.get("feature_extractor_strategy"),
-    #                                 finetuning_strategy=config.get("finetuning_strategy"),
-    #                                 weight_decay=config.model.optimizer.get("weight_decay", 0.01),
-    #                                 seed=config.get("seed")))
-    # config.model = model_config
     config.lr_tuner_dir = os.path.join(config.results_dir, f"task_{task_id}", "lr_tuner")
     
     config = OmegaConf.create(OmegaConf.to_container(config, resolve=True))
@@ -258,13 +123,13 @@ def train(config,
     logger = configure_loggers(config)    
     trainer = configure_trainer(config, callbacks=callbacks, logger=logger)
     pp(config)
-    # import pdb; pdb.set_trace()
-    model = build_model_or_load_from_checkpoint(ckpt_path=config.model.ckpt_path,
-                                                ckpt_dir=config.model.ckpt_dir,
-                                                ckpt_mode=config.model.ckpt_mode,
-                                                config=config)
-    if not getattr(model, "label_encoder", None):
-        model.label_encoder = datamodule.label_encoder
+    model, config = configure_model(config, label_encoder)
+    # model = build_model_or_load_from_checkpoint(ckpt_path=config.model.ckpt_path,
+    #                                             ckpt_dir=config.model.ckpt_dir,
+    #                                             ckpt_mode=config.model.ckpt_mode,
+    #                                             config=config)
+    # if not getattr(model, "label_encoder", None):
+    #     model.label_encoder = datamodule.label_encoder
     
     logs["pretrain"] = pretrain_hook(trainer,
                                      model,
@@ -287,13 +152,6 @@ def train(config,
 
     return logs, model, trainer
 
-#     results['model_config'] = OmegaConf.to_container(config.model, resolve=True)
-#     results['data_config'] = OmegaConf.to_container(config.data, resolve=True)
-#     results['hparams_config'] = OmegaConf.to_container(config.get("hparams",{}), resolve=True)    
-#     ETL.config2yaml(results, os.path.join(config.results_dir, "results.yaml"))
-#     if wandb.get("run",None):
-#         wandb.save(os.path.join(config.results_dir, "results.yaml"))
-    
 ################################################
 ################################################
 
@@ -340,15 +198,9 @@ def main(config):
 #     os.environ["WANDB_PROJECT"] = "image_classification_train"
     os.environ["WANDB_DIR"] = config.experiment_dir        
 #     torch.backends.cudnn.benchmark = True
-#     torch.backends.cudnn.enabled = True
-    
+    torch.backends.cudnn.enabled = True
     if config.run_trial in ["train_classifier"]:
         logs, model, trainer = train(config, task_id=config.task_id)
-        
-    # elif config.run_trial in ["finetune_new_classifier"]:
-    #     results, config = finetune_new_classifier(config,
-    #                                               task_id=config.task_id)
-
     results = logs["test_results"]
     print(f"Final checkpoint saved to: {results['ckpt_path']}")
     return ["test_acc"]
@@ -362,7 +214,95 @@ if __name__ == '__main__':
 ##################################################
 ##################################################
 
+# def lightning_checkpoint_connector(ckpt_path: Optional[str]=None,
+#                                    **kwargs) -> Optional[LightningClassifier]:
+#     # pretrained_filename = config.trainer.resume_from_checkpoint #config.checkpoint_dir
+#     if os.path.isfile(str(ckpt_path)):
+#         print(f"Found pretrained lightning checkpoint model at {ckpt_path}, loading...")
+#         return LightningClassifier.load_from_checkpoint(ckpt_path, **kwargs) # Automatically loads the model with the saved hyperparameters
+    
 
+# def pretrained_model_checkpoint_connector(ckpt_path: Optional[str]=None,
+#                                           **kwargs) -> Optional[LightningClassifier]:
+#     if os.path.isfile(str(ckpt_path)):
+#         print(f"Found pretrained custom model checkpoint at {ckpt_path}, loading...")
+#         return LightningClassifier.load_model_from_checkpoint(ckpt_path, **kwargs)
+
+
+# def initialize_model_from_scratch_connector(**kwargs) -> Optional[LightningClassifier]:
+#     return LightningClassifier(**kwargs)
+#         # model.label_encoder = datamodule.label_encoder
+
+# def pretrained_model_from_imagenet_connector(**kwargs) -> Optional[LightningClassifier]:
+#     return LightningClassifier(**kwargs)
+
+
+# def pretrained_backbone_w_new_classifier_connector(ckpt_path: Optional[str]=None,
+#                                                    new_num_classes: Optional[int]=None,
+#                                                   **kwargs) -> Optional[LightningClassifier]:
+#     return LightningClassifier.init_pretrained_backbone_w_new_classifier(ckpt_path,
+#                                                                          new_num_classes=new_num_classes,
+#                                                                          **kwargs)
+    
+    
+# CKPT_MODES = {"lightning_checkpoint":lightning_checkpoint_connector,
+#               "pretrained_model_checkpoint":pretrained_model_checkpoint_connector,
+#               "pretrained_backbone_w_new_classifier":pretrained_backbone_w_new_classifier_connector,
+#               "initialize_model_from_scratch":initialize_model_from_scratch_connector,
+#               "pretrained_model_from_imagenet":pretrained_model_from_imagenet_connector}
+    
+    
+# def build_model_or_load_from_checkpoint(ckpt_path: Optional[str]=None,
+#                                         ckpt_dir: Optional[str]=None,
+#                                         ckpt_mode: Optional[str]=None,
+#                                         config=None) -> Optional[LightningClassifier]:
+    
+#     if os.path.isdir(str(ckpt_dir)) and (not os.path.isfile(str(ckpt_path))):
+#         ckpt_paths, ckpt_path = scan_ckpt_dir(ckpt_dir)
+#     config.model.update({"ckpt_path":ckpt_path})
+#     if ckpt_mode in CKPT_MODES:
+#         try:
+#             model = CKPT_MODES[ckpt_mode](#ckpt_path=ckpt_path,
+#                                           **config.model)
+#         except Exception as e:
+#             print(e, f"Chosen ckpt_mode={ckpt_mode} did not work, cycling through other options.")
+            
+#     else:
+#         for ckpt_mode in CKPT_MODES:
+#             try:
+#                 model = CKPT_MODES[ckpt_mode](#ckpt_path=ckpt_path,
+#                                               **config.model)
+#             except Exception as e:
+#                 print(e, f"Chosen ckpt_mode={ckpt_mode} did not work, cycling through remaining options.")
+                
+#     return model
+
+
+# def load_results_if_previously_completed(config) -> Optional[DictConfig]:
+#     """
+#     Checks if a results.yaml file has previously been saved in order to circumvent previously completed trials.
+#     """
+#     if os.path.isfile(os.path.join(config.results_dir, "results.yaml")):
+#         results_file_path = os.path.join(config.results_dir, "results.yaml")
+#         results = OmegaConf.load(results_file_path)
+#         print(f"Found pre-existing results saved to file: {results_file_path}")
+#         print(f"Results:"); pp(results)
+#         return results
+    
+#     results_file_path = str(config.source.get("results_filepath"))
+#     if os.path.isfile(results_file_path):
+#         results = OmegaConf.load(results_file_path)
+#         print(f"Found results from source training stage saved to file: {results_file_path}")
+#         print(f"Results:"); pp(results)
+#         return results
+        
+# def scan_ckpt_dir(ckpt_dir):
+#     ckpt_paths = [os.path.join(ckpt_dir, ckpt) for ckpt in os.listdir(ckpt_dir)]
+#     if len(ckpt_paths):
+#         print(f"Found {len(ckpt_paths)} ckpts:" + "\n" + f"{ckpt_paths}")
+#         last_ckpt = ckpt_paths[-1]
+#         return ckpt_paths, last_ckpt
+#     return ckpt_paths, None
 
 
 
@@ -371,6 +311,9 @@ if __name__ == '__main__':
     
     
     
+
+##################################################
+##################################################
 
 
 

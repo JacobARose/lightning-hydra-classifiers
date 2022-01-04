@@ -94,9 +94,7 @@ def run_lr_tuner(trainer: pl.Trainer,
         if hasattr(model, "config"):
             model.config.lr = best_lr
         
-#         elif hasattr(model, "hparams"):
-#             model.hparams.lr = best_lr
-#         model.config.optimizer.lr = best_lr
+
         model.hparams.lr = best_lr
         config.model.lr = best_lr
 #         config.model.optimizer.lr = model.config.lr

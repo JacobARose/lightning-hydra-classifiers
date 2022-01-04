@@ -297,7 +297,7 @@ def cmdline_args(args=""):
     p.add_argument("-r", "--resolution", dest="resolution", type=int, nargs="*", default=512,
                    help="Resolution(s) to build symlinks from, images should be resized to (3, res, res).")
     p.add_argument("-d", "--root_dir", dest="root_dir", type=str,
-                   default="/media/data_cifs/projects/prj_fossils/data/processed_data/leavesdb-v1_0/images",
+                   default="/media/data_cifs/projects/prj_fossils/data/processed_data/leavesdb-v1_1/images",
                    help="""Destination image root dir. Script will expect source images to exist in class-wise subdirs in ".{dataset_name}/original/full/jpg". Then, for creating the target images it will create subdirs ".{dataset_name}/{resolution}/{threshold}/jpg" for user-input threshold value.""")
     p.add_argument("-a", "--run-all", dest="run_all", action="store_true",
                    help="Overrides any values provided to --dataset_name. Flag for when user would like to run through all default threshold arguments on all datasets. Currently available: ['Extant_Leaves', 'Florissant_Fossil', 'General_Fossil'].")

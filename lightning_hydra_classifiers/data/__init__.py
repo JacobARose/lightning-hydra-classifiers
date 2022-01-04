@@ -8,6 +8,6 @@ from .datasets import common
 # CommonDataset.available_datasets.update(pnas.available_datasets)
 
 from . import datasets
-from . import datamodules
+# from . import datamodules
 from . import utils
 from . import wandb

@@ -9,11 +9,10 @@ generate experiment directories containing csv datasets and yaml configs
 
 Currently covers:
     - leavesdb v0_3
+    - leavesdb v1_0
     
 Work In Progress:
-    - leavesdb v1_0
-
-
+    - leavesdb v1_1
 
 TODO:
     - Add to a make file in base directory
@@ -63,11 +62,6 @@ from lightning_hydra_classifiers.utils.common_utils import (DataSplitter,
                                                             LabelEncoder,
                                                             trainval_split,
                                                             trainvaltest_split)
-
-
-
-
-
 
 
 

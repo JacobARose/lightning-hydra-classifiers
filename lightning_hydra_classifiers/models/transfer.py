@@ -24,26 +24,12 @@ lightning_hydra_classifiers/models/_DEPRECATED/transfer.py
 
 import logging
 import os
-# from pathlib import Path
-# import pytorch_lightning as pl
 from rich import print as pp
 import pandas as pd
-# import torch
-# import torch.nn as nn
-# import torch.nn.functional as F
-# import torch.optim as optim
-# from torch.optim import lr_scheduler
-# from torch.utils.data import DataLoader
 import numpy as np
-# import torchvision
-# from torchvision import datasets, models, transforms as t
-# from fastprogress.fastprogress import master_bar, progress_bar
-# import matplotlib.pyplot as plt
-# source: https://github.com/hirune924/lightning-hydra/blob/master/layer/layer.py
 import torch
 import torch.nn as nn
 import pytorch_lightning as pl
-# from typing import Optional
 import timm
 import glob
 import hydra
@@ -322,15 +308,13 @@ class LayerFreezeLightningPlugin:
 #         """
 #         self.eval()
 
-    def on_validation_model_train(self) -> None:
-        """
-        Sets the model to train during the val loop
-        """
-        self.train()
-        self.set_strategy(feature_extractor_strategy=self.hparams.feature_extractor_strategy)
+    # def on_validation_model_train(self) -> None:
+    #     """
+    #     Sets the model to train during the val loop
+    #     """
+    #     self.train()
+    #     self.set_strategy(feature_extractor_strategy=self.hparams.feature_extractor_strategy)
 
-    
-    
     
     @classmethod
     def freeze(cls,
@@ -429,33 +413,27 @@ class LayerFreezeLightningPlugin:
             self.unfreeze(l)
             if layer_id == unfreeze_down_to:
                 break
-            
 
-    
-    @classmethod
-    def freeze_up_to(cls, 
-                     module, 
-                     stop_layer: Union[int, str]=None,
-                     freeze_bn: bool=True):
+#     @classmethod
+#     def freeze_up_to(cls, 
+#                      module, 
+#                      stop_layer: Union[int, str]=None,
+#                      freeze_bn: bool=True):
 
-        cls.unfreeze(module, freeze_bn=freeze_bn)
+#         cls.unfreeze(module, freeze_bn=freeze_bn)
 
-        if isinstance(stop_layer, str):
-            modules = list(module.named_modules())
-        elif isinstance(stop_layer, int) or (stop_layer is None):
-            modules = list(enumerate(module.modules()))
+#         if isinstance(stop_layer, str):
+#             modules = list(module.named_modules())
+#         elif isinstance(stop_layer, int) or (stop_layer is None):
+#             modules = list(enumerate(module.modules()))
 
-        for module_id, m in modules:
-            if stop_layer == module_id:
-                logger.warning(f"Stopping at layer: {n}")
-                break
-            cls.freeze(m, freeze_bn=freeze_bn)
-#             for param_id, param in m.named_parameters():
-#                 param.requires_grad = False
-#             m.eval()
-#             cls.freeze_bn(m, freeze_bn)
-            logger.warning(f"Layer {module_id}: type={type(m)}|training={m.training}")
-            logger.warning(f"requires_grad={np.all([p.requires_grad for p in m.parameters()])}")
+#         for module_id, m in modules:
+#             if stop_layer == module_id:
+#                 logger.warning(f"Stopping at layer: {n}")
+#                 break
+#             cls.freeze(m, freeze_bn=freeze_bn)
+#             logger.warning(f"Layer {module_id}: type={type(m)}|training={m.training}")
+#             logger.warning(f"requires_grad={np.all([p.requires_grad for p in m.parameters()])}")
 
 
 
@@ -860,19 +838,3 @@ class LightningClassifier(BaseLightningModule):
 
         return model ##, missed_keys
     
-    
-    
-#         state_dict = {"state_dict": self.model.model.state_dict()}
-#         if isinstance(metadata, dict):
-#             state_dict["metadata"] = metadata
-        
-#         ckpt_path = os.path.join(ckpt_dir, ckpt_filename)
-#         torch.save(state_dict, ckpt_path)
-        
-#         if verbose and os.path.isfile(ckpt_path):
-#             print(f"Saved backbone state_dict to disk at: {ckpt_path}")
-            
-#         if not os.path.isfile(ckpt_path):
-#             print(f"[WARNING] Error saving model backbone to {ckpt_path} ")
-            
-#         return ckpt_path

@@ -363,17 +363,22 @@ def query_and_preprocess_catalog(config):
             ::y_col
             ::threshold
             ::resolution
+            ::version, default="latest"
     
     """
     tag = available_datasets.query_tags(dataset_name=config.dataset_name,
                                         y_col=config.y_col,
                                         threshold=config.threshold,
                                         resolution=config.resolution)
-    root_dir = available_datasets.get_latest(tag)
+    if config.get("version") in [None, "latest"]:
+        root_dir = available_datasets.get_latest(tag)
+    else:
+        root_dir = available_datasets.get(tag, config.version)
     print(f"Tag: {tag}")
     print(f"Root Dir: {root_dir}")
+    print(f"Version: {config.get('version')}")
     if not os.path.isdir(root_dir):
-        print("[INFO] There is not yet any directory located at: {root_dir}. Skipping dataset validation.")
+        print(f"[INFO] There is not yet any directory located at: {root_dir}. Skipping dataset validation.")
         return pd.DataFrame(), root_dir
     data_df = parse_df_catalog_from_image_directory(root_dir=root_dir, dataset_name=config.dataset_name)
 
@@ -468,11 +473,8 @@ def warm_start_catalogs(config,
 #             remaining_stragglers = target_only.target_path.progress_apply(os.path.isfile).sum()
 #             assert (remaining_stragglers == 0)
 #             print(f"[SUCCESS] Removed {target_only.shape[0]} image files from where they dont belong!")
-        
-        
-        
+
         print(shared.shape, diff.shape, source_only.shape, target_only.shape)
-#         import pdb;pdb.set_trace()
         data_df = source_only
 
         if save_report is not None:
@@ -602,11 +604,11 @@ def main(args):
 #########################################
 
 
-def cmdline_args():
+def cmdline_args(args=None):
     p = argparse.ArgumentParser(description="Resize datasets to a new resolution, using the clever crop resize function. Requires source images to exist in {root_dir}/original/jpg and be organized into 1 subdir per-class.")
     p.add_argument("-r", "--resolution", dest="resolution", type=int, nargs="*",
                    help="target resolution, images resized to (3, res, res).")
-    p.add_argument("-n", "--dataset_name", dest="dataset_name", type=str, nargs="*", default="Extant_Leaves",
+    p.add_argument("-n", "--dataset_name", dest="dataset_name", type=str, nargs="*", default=["Extant_Leaves"],
                    help="""Base dataset_name to be used to query the source root_dir.""")
     p.add_argument("-a", "--run-all", dest="run_all", action="store_true",
                    help="Flag for when user would like to run through all default resolution arguments on a given dataset. Currently includes resolutions = [512, 1024, 1536, 2048].")
@@ -619,7 +621,7 @@ def cmdline_args():
     p.add_argument("-clean", "--run_clean", dest="run_clean", action="store_true", default=False,
                    help="Pass this flag to run the target cleaning process prior to generating any new files. Removes any images from target dirs that are not represented in the source catalog.")
     p.add_argument("--num_workers", dest="num_workers", type=int, default=15)    
-    args = p.parse_args()
+    args = p.parse_args()#args or sys.argv)
     
 
     print(args)

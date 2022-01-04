@@ -31,8 +31,6 @@ class DataModuleConfig(BaseConfig):
     batch_size: int = 32
     num_workers: int = 4
     pin_memory: bool = True
-        
-        
     dataset_name: str = ""
 
 
