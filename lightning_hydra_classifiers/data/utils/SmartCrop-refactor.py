@@ -11,33 +11,36 @@
 
 import argparse
 import logging
-from tqdm.auto import tqdm, trange
-from typing import Callable, Optional, Union, List, Tuple
-from torchvision.datasets import ImageFolder
-import torch
 import os
-from pathlib import Path
 import random
-from rich import print as pp
+from pathlib import Path
+from typing import Callable, List, Optional, Tuple, Union
 
-import numpy as np
-from PIL import Image, ImageStat
-import PIL
 import cv2
+import numpy as np
+import PIL
+import torch
+from PIL import Image, ImageStat
+from rich import print as pp
+from torchvision.datasets import ImageFolder
+from tqdm.auto import tqdm, trange
+
 seed = 334455
 random.seed(seed)
 np.random.seed(seed)
-from torchvision import transforms
-from torchvision import utils
-import torchvision
-from torch import nn
-from lightning_hydra_classifiers.utils.ResizeRight.resize_right import resize_right, interp_methods
 # from ResizeRight.resize_right import resize_right, interp_methods
 from functools import partial
-import ray
+
 import modin.pandas as pd
-from tqdm import tqdm
+import ray
+import torchvision
+from lightning_hydra_classifiers.utils.ResizeRight.resize_right import (
+    interp_methods, resize_right)
 from modin.config import ProgressBar
+from torch import nn
+from torchvision import transforms, utils
+from tqdm import tqdm
+
 ProgressBar.enable()
 pd.set_option('display.max_columns', 500)
 pd.set_option('display.max_colwidth', 200)
@@ -46,15 +49,18 @@ pd.set_option('display.max_colwidth', 200)
 # InteractiveShell.cache_size = 0
 # InteractiveShell.ast_node_interactivity = "all"
 
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
+
 import matplotlib.pyplot as plt
 import seaborn as sns
+
 sns.set(style='white')
 
 
 
 
 import json
+
 totensor: Callable = torchvision.transforms.ToTensor()
     
 def toPIL(img: torch.Tensor, mode="RGB") -> Callable:
@@ -250,21 +256,23 @@ def split_df_into_chunks(data_df: pd.DataFrame, num_chunks: int) -> List[pd.Data
     df_chunks = [data_df.iloc[idx,:] for idx in idx_chunks]
     return df_chunks
 
+from typing import *
+
+import dask
+import dask.array as da
+import dask.dataframe as dd
+from dask import delayed
+from lightning_hydra_classifiers.utils.dataset_management_utils import \
+    DatasetFilePathParser
+from lightning_hydra_classifiers.utils.dataset_management_utils import \
+    Extract as ExtractBase
+from lightning_hydra_classifiers.utils.dataset_management_utils import \
+    parse_df_catalog_from_image_directory
+from skimage import io
 ####################################
 ####################################
 from skimage.io import imread
 from skimage.io.collection import alphanumeric_key
-from dask import delayed
-import dask.array as da
-import dask.dataframe as dd
-import dask
-
-
-
-from lightning_hydra_classifiers.utils.dataset_management_utils import Extract as ExtractBase
-from lightning_hydra_classifiers.utils.dataset_management_utils import DatasetFilePathParser, parse_df_catalog_from_image_directory
-from typing import *
-from skimage import io
 
 
 # @dask.delayed
@@ -326,8 +334,6 @@ def batch_ETL(batch_records, target_shape: Tuple[int]):
 
 from munch import Munch
 
-
-
 # root_dir = "/media/data_cifs/projects/prj_fossils/data/processed_data/leavesdb-v1_0/images"
 # print(f'Initiating conversion of images to new image shape = {(3, config.resolution, config.resolution)}')
 clever_crop = CleverCrop()#target_shape=target_config.target_shape)
@@ -335,9 +341,9 @@ clever_crop = CleverCrop()#target_shape=target_config.target_shape)
 
 # ### Query catalog
 
-from lightning_hydra_classifiers.utils.dataset_management_utils import Extract# as ExtractBase
 from lightning_hydra_classifiers.data.utils.catalog_registry import *
-
+from lightning_hydra_classifiers.utils.dataset_management_utils import \
+    Extract  # as ExtractBase
 
 #     tag = available_datasets.query_tags(dataset_name=config.dataset_name,
 #                                         y_col=config.y_col,
@@ -379,6 +385,7 @@ def query_and_preprocess_catalog(config,
 # ### Dask Cluster
 from dask.distributed import Client, LocalCluster, progress
 
+
 def launch_dask_client(config):
     cluster = LocalCluster(dashboard_address=8989,
                            #scheduler_port=8989,
@@ -391,6 +398,7 @@ def launch_dask_client(config):
 
 # ### Scratch
 import dask.bag as db
+
 
 def process_data_records(data_df: pd.DataFrame, config, target_config):
     

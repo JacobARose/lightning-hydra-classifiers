@@ -50,11 +50,11 @@ Examples:
 
 import argparse
 from dataclasses import dataclass
+from typing import Dict, List, Optional, Tuple, Union
+
 import pandas as pd
 import rich
 from rich import print as pp
-from typing import List, Dict, Optional, Tuple, Union
-
 
 __all__ = ["leavesdbv0_3", "leavesdbv1_0", "leavesdbv1_1", "available_datasets", "AvailableDatasets"]
 
@@ -480,6 +480,7 @@ leavesdbv1_1 = Leavesdbv1_1()
 
 
 import rich.repr
+
 
 # @rich.repr.auto
 class AvailableDatasets:

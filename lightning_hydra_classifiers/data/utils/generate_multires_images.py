@@ -45,21 +45,22 @@ Note: When launching in parallel from the cmdline, be mindful of specifying low 
 # Created on: Tuesday June 29th, 2021
 
 import logging
-from tqdm.auto import tqdm, trange
-from typing import Callable, Optional, Union, List, Tuple
-from torchvision.datasets import ImageFolder
-import torch
 import os
-import pandas as pd
-import numpy as np
-from PIL import Image, ImageStat
-import PIL
-
-from pathlib import Path
 import random
-from rich import print as pp
-import matplotlib.pyplot as plt
 import time
+from pathlib import Path
+from typing import Callable, List, Optional, Tuple, Union
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import PIL
+import torch
+from PIL import Image, ImageStat
+from rich import print as pp
+from torchvision.datasets import ImageFolder
+from tqdm.auto import tqdm, trange
+
 seed = 334455
 
 
@@ -68,18 +69,21 @@ np.random.seed(seed)
 pd.set_option('display.max_columns', 500)
 pd.set_option('display.max_colwidth', 200)
 
-from dataclasses import dataclass, asdict
-from torchvision import transforms
-from torchvision import utils
-import torchvision
-from torch import nn
-from functools import partial
 import json
+from dataclasses import asdict, dataclass
+from functools import partial
+from typing import *
+
+import torchvision
+from lightning_hydra_classifiers.utils.dataset_management_utils import (
+    DatasetFilePathParser, diff_dataset_catalogs,
+    parse_df_catalog_from_image_directory)
+from lightning_hydra_classifiers.utils.ResizeRight.resize_right import (
+    interp_methods, resize_right)
 from munch import Munch
 from pandarallel import pandarallel
-from lightning_hydra_classifiers.utils.ResizeRight.resize_right import resize_right, interp_methods
-from lightning_hydra_classifiers.utils.dataset_management_utils import DatasetFilePathParser, parse_df_catalog_from_image_directory, diff_dataset_catalogs
-from typing import *
+from torch import nn
+from torchvision import transforms, utils
 
 tqdm.pandas()
 
@@ -328,8 +332,9 @@ def resize_and_resave_dataset_parallel(data,
 
 
 
-import sys
 import argparse
+import sys
+
 from lightning_hydra_classifiers.data.utils.catalog_registry import *
 
 # def query_and_preprocess_source_and_target_catalog(config,
