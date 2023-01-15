@@ -23,7 +23,7 @@ import json
 import torchdata
 
 from lightning_hydra_classifiers.utils import template_utils
-from lightning_hydra_classifiers.utils.plot_utils import colorbar
+# from lightning_hydra_classifiers.utils.plot_utils import colorbar
 
 
 log = template_utils.get_logger(__name__)

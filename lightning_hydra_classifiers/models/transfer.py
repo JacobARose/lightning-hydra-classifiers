@@ -705,8 +705,18 @@ class LightningClassifier(BaseLightningModule):
     
     def configure_optimizers(self):
         print(f"self.hparams={self.hparams}")
-        self.optimizers = [torch.optim.AdamW([{"params":self.model.backbone.parameters(), "lr":self.get_lr("backbone"), "weight_decay": self.hparams.weight_decay},
-                                            {"params":self.model.head.parameters(), "lr":self.get_lr("head"), "weight_decay": self.hparams.weight_decay}])]
+        self.optimizers = [torch.optim.AdamW([
+			{
+				"params":self.model.backbone.parameters(),
+				"lr":self.get_lr("backbone"),
+				"weight_decay": self.hparams.weight_decay
+			},
+			{
+				"params":self.model.head.parameters(),
+				"lr":self.get_lr("head"),
+				"weight_decay": self.hparams.weight_decay
+			}
+		])]
 #         self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizers, T_max=self.config.t_max, eta_min=self.config.min_lr)
         self.schedulers = configure_schedulers(optimizer=self.optimizers[0],
                                                config=self.hparams.get("scheduler",{}))
